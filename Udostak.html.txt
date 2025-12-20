@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Удостоверение личности</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #ffffff; /* БЕЛЫЙ ФОН */
+            max-width: 400px;
+            margin: 0 auto;
+            min-height: 100vh;
+        }
+
+        .header {
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .back-btn {
+            color: #666;
+            font-size: 28px;
+            margin-right: 12px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            line-height: 1;
+        }
+
+        .header-title {
+            font-size: 17px;
+            font-weight: 500;
+            color: #333;
+        }
+
+        .tabs {
+            display: flex;
+            padding: 0 16px;
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 12px;
+            background: #f2f2f2;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .tab.active {
+            background: #e0e0e0;
+        }
+
+        .content {
+            padding: 16px;
+            padding-bottom: 140px;
+        }
+
+        .upload-area {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            padding-top: 60px;
+        }
+
+        .preview-image {
+            width: 100%;
+            max-width: 360px;
+            border-radius: 16px;
+            display: none;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+        }
+
+        .upload-btn {
+            padding: 12px 50px;
+            border-radius: 25px;
+            background: #f2f2f2;
+            border: none;
+            cursor: pointer;
+        }
+
+        .upload-btn.hidden {
+            display: none;
+        }
+
+        .form-field {
+            background: #f5f5f5;
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 10px;
+        }
+
+        .form-field label {
+            font-size: 12px;
+            color: #777;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .form-field-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .form-field input {
+            border: none;
+            background: transparent;
+            font-size: 15px;
+            font-weight: 500;
+            flex: 1;
+        }
+
+        .form-field input:focus {
+            outline: none;
+        }
+
+        .copy-icon {
+            cursor: pointer;
+            color: #666;
+        }
+
+        .action-buttons {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            max-width: 400px;
+            margin: 0 auto;
+            padding: 12px 16px 20px;
+            background: #ffffff;
+        }
+
+        .action-buttons.requisites-mode .btn-primary,
+        .action-buttons.requisites-mode .btn-secondary {
+            display: none;
+        }
+
+        .action-buttons.requisites-mode .btn-requisites {
+            display: block;
+        }
+
+        .btn-primary {
+            background: #4a7fbd;
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 12px;
+            width: 100%;
+            margin-bottom: 10px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+        .btn-secondary,
+        .btn-requisites {
+            background: #f2f2f2;
+            border: none;
+            padding: 14px;
+            border-radius: 12px;
+            width: 100%;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+        .btn-requisites {
+            display: none;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="header">
+    <button class="back-btn">‹</button>
+    <div class="header-title">Удостоверение личности</div>
+</div>
+
+<div class="tabs">
+    <button class="tab active" onclick="showTab('document')">Документ</button>
+    <button class="tab" onclick="showTab('requisites')">Реквизиты</button>
+</div>
+
+<div class="content">
+
+    <div id="documentPage">
+        <div class="upload-area">
+            <img id="previewImage" class="preview-image">
+            <input type="file" id="fileInput" accept="image/*">
+            <button class="upload-btn" id="uploadBtn"
+                onclick="document.getElementById('fileInput').click()">
+                Загрузить
+            </button>
+        </div>
+    </div>
+
+    <div id="requisitesPage" style="display:none;">
+        <div class="form-field">
+            <label>ФИО</label>
+            <div class="form-field-content">
+                <input id="fio" placeholder="Ахметов Даниал Женисович">
+                <span class="copy-icon" onclick="copyField('fio')">📋</span>
+            </div>
+        </div>
+
+        <div class="form-field">
+            <label>ИИН</label>
+            <div class="form-field-content">
+                <input id="iin" placeholder="070709552855">
+                <span class="copy-icon" onclick="copyField('iin')">📋</span>
+            </div>
+        </div>
+
+        <div class="form-field">
+            <label>Дата рождения</label>
+            <input placeholder="09.07.2007">
+        </div>
+
+        <div class="form-field">
+            <label>Номер документа</label>
+            <input placeholder="055925720">
+        </div>
+
+        <div class="form-field">
+            <label>Дата выдачи</label>
+            <input placeholder="03.08.2023">
+        </div>
+
+        <div class="form-field">
+            <label>Срок действия</label>
+            <input placeholder="02.08.2033">
+        </div>
+    </div>
+
+</div>
+
+<div class="action-buttons" id="actionButtons">
+    <button class="btn-primary">Предъявить документ</button>
+    <button class="btn-secondary">Отправить документ</button>
+    <button class="btn-requisites">Отправить реквизиты</button>
+</div>
+
+<script>
+function showTab(tab) {
+    const tabs = document.querySelectorAll('.tab');
+    const doc = document.getElementById('documentPage');
+    const req = document.getElementById('requisitesPage');
+    const actions = document.getElementById('actionButtons');
+
+    tabs.forEach(t => t.classList.remove('active'));
+
+    if (tab === 'document') {
+        tabs[0].classList.add('active');
+        doc.style.display = 'block';
+        req.style.display = 'none';
+        actions.classList.remove('requisites-mode');
+    } else {
+        tabs[1].classList.add('active');
+        doc.style.display = 'none';
+        req.style.display = 'block';
+        actions.classList.add('requisites-mode');
+    }
+}
+
+function copyField(id) {
+    const value = document.getElementById(id).value;
+    if (value) {
+        navigator.clipboard.writeText(value);
+        alert('Скопировано');
+    }
+}
+
+document.getElementById('fileInput').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const img = document.getElementById('previewImage');
+    const btn = document.getElementById('uploadBtn');
+
+    const reader = new FileReader();
+    reader.onload = ev => {
+        img.src = ev.target.result;
+        img.style.display = 'block';
+        btn.classList.add('hidden');
+    };
+    reader.readAsDataURL(file);
+});
+</script>
+
+</body>
+</html>
