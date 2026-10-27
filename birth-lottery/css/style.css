@@ -96,7 +96,9 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .age{font-family:var(--f-display);font-weight:700;font-size:clamp(32px,6vw,48px);line-height:1;font-variant-numeric:tabular-nums}
 .age small{font-family:var(--f-mono);font-weight:400;font-size:13px;color:var(--muted);margin-left:8px;letter-spacing:0}
 .ctrls{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.ctrls .seg button{padding:6px 11px;font-family:var(--f-mono);font-size:13px}
+.ctrls .seg button{padding:6px 10px;font-family:var(--f-mono);font-size:13px}
+.ctrls #segSpeed{gap:4px}
+.ctrls #segSpeed button[data-v="0"]{font-family:var(--f-body)}
 .iconbtn{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 14px;font-size:14px;font-weight:500}
 .iconbtn[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
 .thread-box{position:relative}

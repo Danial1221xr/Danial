@@ -100,11 +100,14 @@
         <div class="age"><span id="lifeAge">0 лет</span><small id="lifeYear"></small></div>
       </div>
       <div class="ctrls">
-        <button class="iconbtn" type="button" id="btnPause">Пауза</button>
-        <div class="seg" id="segSpeed">
+        <div class="seg" id="segSpeed" role="group" aria-label="Скорость времени">
+          <button type="button" aria-pressed="false" data-v="0">Пауза</button>
           <button type="button" aria-pressed="true" data-v="1">×1</button>
-          <button type="button" aria-pressed="false" data-v="5">×5</button>
-          <button type="button" aria-pressed="false" data-v="20">×20</button>
+          <button type="button" aria-pressed="false" data-v="2">×2</button>
+          <button type="button" aria-pressed="false" data-v="4">×4</button>
+          <button type="button" aria-pressed="false" data-v="6">×6</button>
+          <button type="button" aria-pressed="false" data-v="8">×8</button>
+          <button type="button" aria-pressed="false" data-v="16">×16</button>
         </div>
         <button class="iconbtn" type="button" id="btnAuto" aria-pressed="false" title="Решения будут приниматься сами">Авто</button>
         <button class="iconbtn" type="button" id="btnQuit">В меню</button>

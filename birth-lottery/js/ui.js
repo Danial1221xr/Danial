@@ -58,12 +58,12 @@ function startLife(){
   setFocus('study');
   const ev=G.L.init();ev.forEach(e=>addFeed(0,e));
   renderAll();show('scrLife');
-  G.running=true;setPauseLabel();
+  G.running=true;syncSpeed();
   queueYear();G.last=performance.now();requestAnimationFrame(loop);
 }
-function setPauseLabel(){$('#btnPause').textContent=G.running?'Пауза':'Продолжить'}
-$('#btnPause').addEventListener('click',()=>{G.running=!G.running;setPauseLabel()});
-segInit('#segSpeed','1',v=>{G.speed=+v});
+/* скорость: «Пауза» — тот же ряд кнопок, что и ×1…×16 */
+function syncSpeed(){const v=G.running?String(G.speed):'0';document.querySelectorAll('#segSpeed button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)))}
+segInit('#segSpeed','1',v=>{if(v==='0')G.running=false;else{G.running=true;G.speed=+v}syncSpeed()});
 $('#btnAuto').addEventListener('click',e=>{G.auto=!G.auto;e.currentTarget.setAttribute('aria-pressed',String(G.auto))});
 $('#btnQuit').addEventListener('click',e=>{if(!G.quitArm){G.quitArm=true;e.currentTarget.textContent='Точно выйти?';setTimeout(()=>{G.quitArm=false;$('#btnQuit').textContent='В меню'},3000);return}G.L=null;G.running=false;closeSheet();memCount();show('scrStart')});
 segInit('#segFocus','study',v=>setFocus(v));
@@ -97,7 +97,7 @@ function showDec(L,d){const card=$('#sheetCard');card.innerHTML=decHtml(L,d);
 /* ИИ пишет обычную жизнь заранее, на несколько лет вперёд: на высокой скорости — большими кусками */
 function aiPrefetch(L){const ai=window.LR.ai;if(!ai||!ai.available()||G.aiBusy||G.L!==L||!L.alive)return;
   if(G.aiUpTo>=L.age+2)return;
-  const from=Math.max(L.age+1,G.aiUpTo+1),span=G.speed>=20?8:G.speed>=5?5:3,to=Math.min(from+span-1,110);
+  const from=Math.max(L.age+1,G.aiUpTo+1),span=G.speed>=8?8:G.speed>=4?5:3,to=Math.min(from+span-1,110);
   const recent=[...document.querySelectorAll('#feed li .t')].slice(0,8).map(t=>t.textContent.slice(0,140));
   G.aiBusy=true;
   ai.moments(L,from,to,recent).then(r=>{G.aiBusy=false;if(G.L!==L||!r||!Array.isArray(r.events))return;G.aiUpTo=to;
