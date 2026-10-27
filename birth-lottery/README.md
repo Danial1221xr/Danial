@@ -20,7 +20,9 @@ python3 -m http.server 8000      # или: npx serve .
 - `js/engine.js` — движок без DOM (работает и в браузере, и в Node).
 - `js/ui.js` — интерфейс.
 - `js/ai.js`, `js/config.js` — клиент ИИ и его настройки.
-- `data/countries.json` — статистика стран, `data/names.json` — имена, `data/cal.json` — поправки калибровки.
+- `js/map.js`, `js/portrait.js`, `js/charts.js` — карта мира, процедурный портрет со сценами этапов жизни, графики экрана конца.
+- `data/countries.json` — статистика стран, `data/names.json` — имена, `data/cal.json` — поправки калибровки, `data/world.json` — карта (Natural Earth 1:110m, собирается `node tools/build-map.mjs`).
+- `worker/` — Cloudflare Worker для ИИ.
 - `tools/` — калибровка и сбор данных, `tests/` — тесты движка.
 
 ## Работа с Claude Code

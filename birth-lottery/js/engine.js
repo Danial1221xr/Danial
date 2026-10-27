@@ -109,8 +109,8 @@ const DECISIONS=[
  make:(L,x,c)=>{L.flags.armyAsked=true;const d=DRAFT[c.code];if(Math.random()>(L.sex==='m'?d.p:d.w))return null;
   const y=d.y,po=clamp(0.12+0.25*ncdf(L.zEff())+(L.eduDone>=12?0.1:0),0.05,0.6);
   return {id:'army',title:'Повестка',text:`${Cap(c.inName)} действует призыв. Служба длится ${yrs(y)}.`,
-    opts:[opt('Пойти служить','Работа и учёба встанут на паузу',0.8,()=>{L.serveLeft=y;L.served=true;return 'Вы ушли служить.'}),
-          opt('Добиваться отсрочки',`Получается примерно у ${pct(po)}`,0.2,()=>{if(Math.random()<po)return 'Отсрочку дали.';L.serveLeft=y;L.served=true;return 'Отсрочку не дали. Вы ушли служить.'})]}}},
+    opts:[opt('Пойти служить','Работа и учёба встанут на паузу',0.8,()=>{L.serveLeft=y;L.served=true;L.mark('army','Армия');return 'Вы ушли служить.'}),
+          opt('Добиваться отсрочки',`Получается примерно у ${pct(po)}`,0.2,()=>{if(Math.random()<po)return 'Отсрочку дали.';L.serveLeft=y;L.served=true;L.mark('army','Армия');return 'Отсрочку не дали. Вы ушли служить.'})]}}},
 {id:'keepWorking',ages:[55,80],stage:'старость',when:(L,x)=>L.working&&!L.retired&&!L.flags.keepAsked&&x===retAgeOf(L)-1,make:(L,x,c)=>{L.flags.keepAsked=true;const poor=c.gdp<15000;
   return {id:'keepWorking',title:'Пенсионный возраст',text:poor?'Пенсия в вашей стране маленькая или её нет совсем. Можно работать дальше, пока хватает сил.':'Можно выйти на пенсию или ещё поработать.',
     opts:[opt('Работать дальше','Доход сохранится, но силы уже не те',poor?0.6:0.3,()=>{L.retExtra+=5;return 'Вы решили ещё поработать.'}),
@@ -164,7 +164,7 @@ const DECISIONS=[
 {id:'business',ages:[25,50],stage:'взрослость',when:(L,x)=>L.working&&!L.biz&&!L.flags.bizTried&&x>=25&&x<=50&&Math.random()<0.02*(1+0.5*Math.max(0,L.zEff())),make:(L,x,c)=>{L.flags.bizTried=true;
   const p=clamp(0.3+0.08*L.zEff()+(L.eduDone>=12?0.05:0)+(c.gdp>15000?0.05:0)-(c.gini-35)/200,0.12,0.6);
   return {id:'business',title:'Своё дело',text:'Есть идея открыть своё дело: магазин, мастерскую, кафе или небольшую фирму.',
-    opts:[opt('Открыть своё дело',`Через три года работают примерно ${pct(p)} таких дел`,0.3,()=>{L.biz={y:0,p};L.stress+=0.5;return 'Вы открыли своё дело.'}),
+    opts:[opt('Открыть своё дело',`Через три года работают примерно ${pct(p)} таких дел`,0.3,()=>{L.biz={y:0,p};L.mark('biz','Своё дело');L.stress+=0.5;return 'Вы открыли своё дело.'}),
           opt('Остаться наёмным работником','Меньше риска',0.7,()=>'Вы решили не рисковать.')]}}},
 {id:'housing',ages:[24,40],stage:'взрослость',when:(L,x)=>!L.flags.housing&&!L.serveLeft&&L.zp!==null&&x>=24&&x<=40&&(L.married||x>=30)&&Math.random()<0.25,make:(L,x,c)=>{L.flags.housing=true;
   const can=c.gdp>=10000&&L.zEff()>-0.6,pa=clamp(0.3+0.5*ncdf(L.zEff()),0.1,0.9),par=L.mom||L.dad;
@@ -393,6 +393,8 @@ class Life{
     this.exSpouse=null;this.divAge=null;this.yearRisk=1;this.retExtra=0;this.pensionBoost=1;this.careBonus=1;this.history=[];
     /* этап 3: мечта */
     this.dream=null;this.dreamScore=0;this.dreamWins=0;this.dreamGaveUp=false;this.forkAt=null;this.forksDone=0;
+    /* этап 4: отметки ключевых событий для нити жизни и журнал дохода для графика */
+    this.marks=[];this.incomeLog=[];
     this.sibs=poisson(Math.max(0,c.fert-1)*0.7);
     this.lines=[];
   }
@@ -418,7 +420,7 @@ class Life{
   }
   qNow(x){const qb=this.q[Math.min(x,MAXAGE)];const k=x>=5?this.cal[this.sex]:1;return qb>=1?1:1-Math.pow(1-qb,this.mult(x)*k)}
   init(){
-    const c=this.c,ev=[];
+    const c=this.c,ev=[];this.logIncome();
     ev.push({k:'mile',t:`Вы родились ${c.inName}, ${this.rural?'в деревне':'в городе'}. ${this.g('Мальчик','Девочка')}, вас назвали ${this.name}.`});
     const inc=this.incomeAt(this.zf),p=Math.round(ncdf(this.zf)*100);
     ev.push({k:'info',t:`Семья живёт примерно на ${money(inc)} в месяц на человека (по паритету покупательной способности). ${p<50?`Беднее, чем ${100-p}% семей страны.`:`Богаче, чем ${p}% семей страны.`}`});
@@ -473,7 +475,7 @@ class Life{
         opts:[{label:'Бросить курить',hint:'Получается примерно у 40%',w:0.35,fn:()=>{if(Math.random()<0.4){this.smoker=false;return 'Вы бросили курить.'}return 'Бросить не получилось.'}},
               {label:'Не сейчас',hint:'',w:0.65,fn:()=>'Вы продолжили курить.'}]});}
     if(x>=40&&!this.ill&&Math.random()<0.012*Math.exp(0.05*(x-40))){
-      const ill=pick(['болезнь сердца','опухоль','диабет с осложнениями','болезнь почек','болезнь лёгких']);this.ill=ill;
+      const ill=pick(['болезнь сердца','опухоль','диабет с осложнениями','болезнь почек','болезнь лёгких']);this.ill=ill;this.mark('ill','Диагноз: '+ill);
       const poor=c.gdp<20000;const months=Math.round(clamp((poor?10:3)/Math.exp(0.6*this.zEff()),1,60));
       const tp=clamp(0.5+0.4*ncdf(this.zEff()),0.2,0.95);
       ds.push({id:'ill',title:'Диагноз',text:`Врачи нашли у вас серьёзную болезнь: ${ill}.`,
@@ -491,6 +493,11 @@ class Life{
   }
   autoChoice(d){return wpick(d.opts.map((o,i)=>[i,Math.max(0.0001,o.w)]))}
   resolve(d,i){const r=d.opts[i].fn();this.history.push({age:this.age,id:d.id,opt:i,label:d.opts[i].label});return r}
+  /* ключевое событие на нити жизни */
+  mark(key,label){this.marks.push({age:this.age,key,label})}
+  /* фаза жизни: детство, учёба, работа, старость */
+  phase(){if(!this.alive)return 'dead';const a=this.age;if(a<6)return 'child';if(this.inSchool||this.uni||this.college||a<15)return 'school';if(this.retired||a>=65)return 'old';return 'work'}
+  logIncome(){this.incomeLog.push({age:this.age,inc:Math.round(this.income()),avg:Math.round(avgIncome(this.c)),ph:this.phase()})}
   /* ---- мечта ---- */
   dreamQuestion(){const pool=DREAM_PRESETS.slice(),pre=[];
     while(pre.length<4){const q=wpick(pool.map(v=>[v,v[1]]));pool.splice(pool.indexOf(q),1);pre.push(q[0])}
@@ -500,6 +507,7 @@ class Life{
     this.dream={text:String(p.text||p.title).slice(0,200),title:String(p.title).slice(0,60),sphere:s,edu:p.edu||SPHERES[s].edu,needUni:!!p.needUni,needMove:!!p.needMove,
       difficulty:clamp(Math.round(p.difficulty)||3,1,5),short:String(p.short||'').slice(0,240),src:p.src||'local'};
     this.forkAt=FORK_AGES.map(([a,b])=>a+Math.floor(Math.random()*(b-a+1)));this.forksDone=0;
+    this.mark('dream','Мечта: '+this.dream.title);
     return `Мечта: ${this.dream.title}.`}
   /* шанс варианта считает только движок: трудность мечты, страна, достаток, образование и прошлые успехи */
   dreamChance(k){const d=this.dream,c=this.c,z=this.zEff();
@@ -540,17 +548,17 @@ class Life{
     return {key,score:+s.toFixed(2),title:DREAM_END[key][0],text:DREAM_END[key][1]}}
   divorce(){this.married=false;this.exSpouse=this.spouse;this.divAge=this.age;this.stress+=1;return `Вы развелись с ${this.spouse}.`}
   get spouseAge(){return this.age+(this.spDiff||0)}
-  marry(sp,spAge){this.married=true;this.everMarried=true;this.spouse=sp;this.spDiff=clamp(spAge,14,90)-this.age;
+  marry(sp,spAge){this.mark('ring','Свадьба: '+sp);this.married=true;this.everMarried=true;this.spouse=sp;this.spDiff=clamp(spAge,14,90)-this.age;
     if(this.sex==='f'&&this.working&&['ME','SA'].includes(this.c.region)&&Math.random()<0.55){this.working=false;this.homemaker=true}}
   pickDest(){const list=(DEST[this.c.region]||DEST.HI).map(([k,w])=>[BY[k],w]).filter(([d])=>d&&d.code!==this.c.code&&d.gdp>this.c.gdp*1.2);return list.length?wpick(list):null}
-  migrate(d){if(Math.random()<0.7){const from=this.c;this.c=d;this.migrated=true;this.rural=false;this.q=getTable(d,this.sex);this.sigma=Math.SQRT2*ndtri((d.gini/100+1)/2);
+  migrate(d){if(Math.random()<0.7){const from=this.c;this.c=d;this.migrated=true;this.mark('move','Переезд: '+d.name);this.rural=false;this.q=getTable(d,this.sex);this.sigma=Math.SQRT2*ndtri((d.gini/100+1)/2);
       if(this.zp!==null)this.zp=this.zp*0.5-0.6;else this.zp=-0.8;this.shock=0;if(this.dream&&this.dream.needMove&&!this.dreamGaveUp)this.dreamScore+=0.5;return `Вы уехали. Новая страна: ${d.name}. Первое время будет трудно.`}
     return 'Уехать не вышло: документы не одобрили.'}
   startWork(){const c=this.c,x=this.age;let tier;
     if(this.rural&&Math.random()<clamp(c.agri/100/ruralShare(c),0,0.95))tier='agri';
     else if(this.degree)tier='uni';else if(this.flags.collegeDone)tier='hi';else if(this.eduDone>=12)tier=Math.random()<0.6?'hi':'mid';else if(this.eduDone>=7)tier='mid';else tier='low';
     const mj=tier==='uni'&&this.major?MAJORS[this.major]:null;
-    this.job=mj?mj[1][this.sex==='m'?0:1]:pick(JOBS[tier][this.sex]);this.working=true;
+    this.job=mj?mj[1][this.sex==='m'?0:1]:pick(JOBS[tier][this.sex]);this.working=true;if(!this.flags.firstJob){this.flags.firstJob=true;this.mark('work','Первая работа: '+this.job)}
     this.zp=0.55*this.zf+0.6*gauss()+0.12*(this.eduDone-c.school)+(this.degree?0.4:0)-(tier==='agri'?0.3:0)
       +(mj?mj[2]*(this.major==='it'&&c.gdp<15000?0.5:1):0)+(this.flags.honors?0.12:0)+(this.flags.uniWork?0.08:0)+(this.flags.collegeDone?0.15:0);
     return `${x<15?'Уже в '+yrs(x)+' вы':'Вы'} начали работать: ${this.job}.`}
@@ -563,17 +571,17 @@ class Life{
     if(this.dad&&Math.random()<1-Math.pow(1-qd[Math.min(this.dadAge+x,MAXAGE)],pw)){this.dad=false;this.stress+=1;this.flags.parentDied=x;ev.push({k:'sad',t:`Умер ваш папа. Ему было ${yrs(this.dadAge+x)}.`})}
     if(this.caring&&!this.mom&&!this.dad)this.caring=null;
     // school
-    if(x===6){if(this.eduPlan>0){this.inSchool=true;ev.push({k:'mile',t:'Вы пошли в школу.'})}
+    if(x===6){if(this.eduPlan>0){this.inSchool=true;this.mark('school','Пошли в школу');ev.push({k:'mile',t:'Вы пошли в школу.'})}
       else ev.push({k:'info',t:this.rural?'В школу вы так и не пошли: до неё далеко, а дома нужна помощь.':'В школу вы так и не пошли: семье нечем платить за форму и учебники.'})}
     else if(this.inSchool){this.eduDone++;if(this.focus==='study')this.studyPts++;
       if(this.eduDone>=this.eduPlan){
         if(this.eduPlan<12&&this.studyPts>=3&&Math.random()<0.5){this.eduPlan++;this.studyPts=0;ev.push({k:'info',t:'Вы хорошо учились, и вас уговорили остаться ещё на год.'})}
-        else if(this.eduDone>=12){this.inSchool=false;this.flags.uniDecision=true;ev.push({k:'mile',t:'Вы окончили школу.'})}
+        else if(this.eduDone>=12){this.inSchool=false;this.flags.uniDecision=true;this.mark('grad','Окончили школу');ev.push({k:'mile',t:'Вы окончили школу.'})}
         else if(this.eduDone>=4&&x<=16&&!this.flags.leaveAsked){this.flags.leaveAsked=true;this.flags.leaveDecision=true}
         else{this.inSchool=false;if(this.eduDone>=9)this.flags.collegeDecision=true;ev.push({k:'info',t:`Учёба закончилась после ${this.eduDone} ${plural(this.eduDone,['класса','классов','классов'])}.`})}}
     }
-    if(this.college){this.collegeLeft--;if(this.collegeLeft<=0){this.college=false;this.flags.collegeDone=true;ev.push({k:'mile',t:'Вы окончили колледж и получили профессию.'})}}
-    if(this.uni){this.uniLeft--;if(this.uniLeft<=0){this.uni=false;this.degree=true;this.eduDone=16;ev.push({k:'mile',t:'Вы получили диплом.'})}}
+    if(this.college){this.collegeLeft--;if(this.collegeLeft<=0){this.college=false;this.flags.collegeDone=true;this.mark('grad','Окончили колледж');ev.push({k:'mile',t:'Вы окончили колледж и получили профессию.'})}}
+    if(this.uni){this.uniLeft--;if(this.uniLeft<=0){this.uni=false;this.degree=true;this.eduDone=16;this.mark('grad','Диплом вуза');ev.push({k:'mile',t:'Вы получили диплом.'})}}
     // child marriage
     if(this.sex==='f'&&!this.married&&x>=13&&x<=17&&Math.random()<c.cm/100/4.2){this.childBride=true;const sp=pickName(c,'m');this.marry(sp,x+6+Math.round(Math.abs(gauss())*6));if(this.inSchool&&Math.random()<0.7){this.inSchool=false;}ev.push({k:'sad',t:`В ${yrs(x)} вас выдали замуж за ${sp}. ${this.spouseAge-x>8?'Он намного старше.':''}`})}
     // work
@@ -590,13 +598,13 @@ class Life{
     if(this.caring==='home')this.shock-=0.08;else if(this.caring==='paid')this.shock-=0.12;
     this.shock*=0.6;
     const retAge=retAgeOf(this);
-    if(this.working&&x>=retAge&&!this.retired){this.retired=true;this.working=false;ev.push({k:'mile',t:c.gdp>15000?'Вы вышли на пенсию.':'Работать стало тяжело. Вы живёте на помощь детей и небольшие подработки.'})}
+    if(this.working&&x>=retAge&&!this.retired){this.retired=true;this.working=false;this.mark('rest','Пенсия');ev.push({k:'mile',t:c.gdp>15000?'Вы вышли на пенсию.':'Работать стало тяжело. Вы живёте на помощь детей и небольшие подработки.'})}
     // birth
     if(this.pregnant){this.pregnant=false;const ks=Math.random()<0.512?'m':'f';const kn=pickName(c,ks);
       const kid={name:kn,sex:ks,born:x,alive:true,dieAt:null};
       const qk=c.u5/1000*Math.exp(-0.3*this.zEff())*(this.homeBirth?1.3:1);
       if(Math.random()<qk)kid.dieAt=x+(Math.random()<0.6?0:1+Math.floor(Math.random()*4));
-      this.kids.push(kid);
+      this.kids.push(kid);this.mark('baby',(ks==='m'?'Сын ':'Дочь ')+kn);
       ev.push({k:'mile',t:`Родился ребёнок: ${ks==='m'?'сын':'дочь'} ${kn}.`});
       const mr=c.mmr/1e5*(this.homeBirth?1.6:0.6)*(this.sex==='f'&&x<18?2:1);
       if(Math.random()<mr){if(this.sex==='f'){return this.die(ev,'maternal')}else{this.married=false;this.widowed=true;ev.push({k:'sad',t:`Ваша жена ${this.spouse} умерла при родах.`})}}
@@ -614,6 +622,7 @@ class Life{
     // death
     if(Math.random()<this.qNow(x))return this.die(ev,null);
     this.age++;
+    this.logIncome();
     const inc=this.income();if(this.zp!==null&&inc>this.peak)this.peak=inc;
     return ev;
   }
@@ -623,7 +632,7 @@ class Life{
     if(x===40)return `На вопрос «насколько вы довольны жизнью» люди ${c.inName} в среднем отвечают ${String(c.sat).replace('.',',')} из 10.`;
     return null}
   die(ev,forced){
-    this.alive=false;const x=this.age;const key=forced||this.pickCause(x);this.causeKey=key;this.cause=this.causeText(key);
+    this.alive=false;const x=this.age;const key=forced||this.pickCause(x);this.causeKey=key;this.cause=this.causeText(key);this.mark('end','Конец жизни');
     ev.push({k:['hom','sui'].includes(key)?'heavy':'sad',t:`Вы умерли ${x===0?'не дожив до года':'в '+yrs(x)}. Причина: ${this.cause}.`,help:['hom','sui'].includes(key)});
     return ev}
   pickCause(x){const c=this.c,m=this.sex==='m',low=c.gdp<15000,H=Math.max(1e-6,this.qNow(x));
@@ -661,7 +670,7 @@ class Life{
   family(){const alive=this.kids.filter(k=>k.alive).length;let s;
     if(this.married)s=(this.sex==='m'?'женат':'замужем')+' ('+this.spouse+')';else if(this.widowed)s=this.sex==='m'?'вдовец':'вдова';else if(this.everMarried)s='в разводе';else s=this.age<16?'с родителями':'не в браке';
     if(this.kids.length)s+=`, ${alive} ${plural(alive,['ребёнок','ребёнка','детей'])}`;return s}
-  snapshot(){return {age:this.age,alive:this.alive,status:this.status(),cause:this.cause}}
+  snapshot(){return {age:this.age,alive:this.alive,status:this.status(),cause:this.cause,ph:this.phase()}}
 }
 function simulateFull(mode,soft){const L=new Life({auto:true,mode,soft});L.init();const snaps=[L.snapshot()];let g=0;
   while(L.alive&&g++<130){const ds=L.beginYear();for(const d of ds)L.resolve(d,L.autoChoice(d));L.endYear();snaps.push(L.snapshot())}

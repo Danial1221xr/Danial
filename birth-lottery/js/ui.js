@@ -20,7 +20,7 @@ const S={mode:store.get('lr.mode','births'),dur:store.get('lr.dur','30'),real:st
 const G={L:null,nbs:[],running:false,speed:1,acc:0,yearDur:25,queue:[],modal:false,last:0,auto:false,quitArm:false,notes:[]};
 
 /* ---------- screens ---------- */
-function show(id){for(const s of ['scrStart','scrLife','scrEnd','scrMem'])$('#'+s).hidden=s!==id;window.scrollTo(0,0);heroOn=id==='scrStart';if(heroOn)requestAnimationFrame(heroFrame)}
+function show(id){for(const s of ['scrStart','scrLife','scrEnd','scrMem'])$('#'+s).hidden=s!==id;window.scrollTo(0,0);if(G.map){if(id==='scrStart')G.map.resume();else G.map.stop()}}
 
 /* ---------- start ---------- */
 function segInit(sel,val,cb){const el=$(sel);el.querySelectorAll('button[data-v]').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.v===String(val)));b.addEventListener('click',()=>{if(b.disabled)return;el.querySelectorAll('button[data-v]').forEach(x=>x.setAttribute('aria-pressed','false'));b.setAttribute('aria-pressed','true');cb(b.dataset.v)})})}
@@ -37,32 +37,20 @@ $('#btnMem').addEventListener('click',()=>{renderMem();show('scrMem')});
 function memCount(){const n=store.get('lr.mem',[]).length;$('#memCount').textContent=n?'· '+n:''}
 memCount();
 
-/* ---------- hero sky ---------- */
-let heroOn=true;const cv=$('#sky'),cx=cv.getContext('2d');const dots=[];let lastB=0,lastD=0;const T0=performance.now();let col={a:'#B9620F',m:'#5A6573'},colT=0;
-const reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-function sizeCv(){const r=cv.getBoundingClientRect(),d=window.devicePixelRatio||1;cv.width=Math.max(1,r.width*d);cv.height=Math.max(1,r.height*d)}
-sizeCv();if(window.ResizeObserver)new ResizeObserver(sizeCv).observe(cv);
-for(let i=0;i<60;i++)dots.push({x:Math.random(),y:Math.random(),t:-1e5,dead:0});
-function heroFrame(ts){if(!heroOn)return;const el=(ts-T0)/1000;
-  if(ts-colT>600){const cs=getComputedStyle(document.documentElement);col.a=cs.getPropertyValue('--accent').trim()||col.a;col.m=cs.getPropertyValue('--muted').trim()||col.m;colT=ts}
-  const b=Math.floor(el*4.3),d=Math.floor(el*2.0);
-  while(lastB<b){dots.push({x:Math.random(),y:Math.random(),t:ts,dead:0});lastB++;if(dots.length>420)dots.shift()}
-  while(lastD<d){const al=dots.filter(o=>!o.dead&&ts-o.t>2500);if(al.length)al[Math.floor(Math.random()*al.length)].dead=ts;lastD++}
-  $('#cBorn').textContent=b.toLocaleString('ru-RU');$('#cDied').textContent=d.toLocaleString('ru-RU');
-  const W=cv.width,H=cv.height,dp=window.devicePixelRatio||1;cx.clearRect(0,0,W,H);
-  for(let i=dots.length-1;i>=0;i--){const o=dots[i],age=ts-o.t;let r=2*dp,a=0.7,c=col.a;
-    if(o.dead){const f=(ts-o.dead)/1600;if(f>=1){dots.splice(i,1);continue}a=0.6*(1-f);c=col.m;r=2*dp}
-    else if(age<1400&&!reduce){const f=age/1400;r=(2+7*(1-f))*dp;a=0.25+0.75*f}
-    cx.globalAlpha=a;cx.fillStyle=c;cx.beginPath();cx.arc(o.x*W,o.y*H,r,0,Math.PI*2);cx.fill()}
-  cx.globalAlpha=1;requestAnimationFrame(heroFrame)}
-requestAnimationFrame(heroFrame);
+/* ---------- карта мира на старте ---------- */
+loadJSON('data/world.json').then(world=>{
+  G.map=LR.map.start($('#map'),world,COUNTRIES,(b,d,recent)=>{
+    $('#cBorn').textContent=b.toLocaleString('ru-RU');$('#cDied').textContent=d.toLocaleString('ru-RU');
+    const t=recent.length?'Только что: '+recent.join(' · '):'';if($('#ticker').textContent!==t)$('#ticker').textContent=t});
+  if($('#scrStart').hidden)G.map.stop();
+}).catch(e=>console.error(e));
 
 /* ---------- life ---------- */
 function startLife(){
   G.L=new Life({mode:S.mode,soft:S.soft});G.notes=[];
   G.nbs=[0,1,2,3].map(()=>simulateFull(S.mode,S.soft));
   G.yearDur=(+S.dur*60)/avgLE(G.L.c);G.acc=0;G.queue=[];G.modal=false;G.quitArm=false;G.endShown=false;
-  $('#feed').innerHTML='';phase.fill(undefined);buildThread();
+  $('#feed').innerHTML='';phase.fill(undefined);buildThread();G.stageKey=G.portraitKey=null;$('#sceneWrap').innerHTML=$('#ptWrap').innerHTML='';
   setFocus('study');
   const ev=G.L.init();ev.forEach(e=>addFeed(0,e));
   renderAll();show('scrLife');
@@ -151,14 +139,24 @@ function addFeed(age,e){const li=document.createElement('li');li.className=e.k||
   li.innerHTML=`<span class="a">${age} ${plural(age,['год','года','лет'])}</span><div><div class="t">${esc(e.t)}</div>${e.help?`<div class="help">${HELP}</div>`:''}</div>`;
   const f=$('#feed');f.insertBefore(li,f.firstChild)}
 
-function buildThread(){const th=$('#thread');th.innerHTML='';for(let i=0;i<100;i++){const t=document.createElement('div');t.className='tick';t.appendChild(document.createElement('i'));th.appendChild(t)}
+function buildThread(){const th=$('#thread');th.innerHTML='';$('#marks').innerHTML='';$('#marks').dataset.n='';for(let i=0;i<100;i++){const t=document.createElement('div');t.className='tick';t.appendChild(document.createElement('i'));th.appendChild(t)}
   const m=document.createElement('div');m.className='le-mark';m.title='Средняя продолжительность жизни в стране';th.appendChild(m)}
 const phase=new Array(130);
 function renderThread(){const L=G.L;const ticks=[...document.querySelectorAll('#thread .tick')];
-  const ph=!L.alive?'dead':L.age<6?'child':(L.inSchool||L.uni)?'school':L.retired||L.age>=65?'old':(L.working||L.homemaker)?'work':'child';
-  if(L.alive)phase[L.age]=ph;
+  if(L.alive)phase[L.age]=L.phase();
   ticks.forEach((t,i)=>{t.className='tick'+(i<L.age?' '+(phase[i]||'child'):'')+(i===L.age&&L.alive?' cur':'')+(i===L.age&&!L.alive?' dead':'');if(i!==L.age)t.firstChild.style.width='0'});
-  const le=L.sex==='m'?L.home.leM:L.home.leF;const mk=document.querySelector('.le-mark');mk.style.left=`calc(${le}% - 1px)`;mk.title=`Средняя продолжительность жизни ${L.sex==='m'?'мужчин':'женщин'} ${L.home.inName}: ${le}`}
+  const le=L.sex==='m'?L.home.leM:L.home.leF;const mk=document.querySelector('.le-mark');mk.style.left=`calc(${le}% - 1px)`;mk.title=`Средняя продолжительность жизни ${L.sex==='m'?'мужчин':'женщин'} ${L.home.inName}: ${le}`;
+  renderMarks(L)}
+/* иконки ключевых событий над нитью; близкие по возрасту расходятся по двум рядам */
+const MARK_ICON={school:'i-book',grad:'i-cap',work:'i-case',ring:'i-ring',baby:'i-baby',move:'i-plane',ill:'i-plus',rest:'i-sun',end:'i-end',dream:'i-star',army:'i-shield',biz:'i-shop'};
+function renderMarks(L){const box=$('#marks');if(box.dataset.n===String(L.marks.length))return;box.dataset.n=L.marks.length;
+  const gap=2400/Math.max(240,box.clientWidth||600);// ≈24 px в процентах ширины нити
+  const rows=[[],[]],chips=[];
+  for(const m of L.marks){const x=Math.min(99,m.age),text=`${m.age} ${plural(m.age,['год','года','лет'])}: ${m.label}`;
+    const free=rows.findIndex(r=>!r.length||x-r[r.length-1].x>=gap);
+    if(free>=0){const c={x,row:free,m,list:[text]};rows[free].push(c);chips.push(c)}
+    else{const c=rows.flat().reduce((b,q)=>Math.abs(q.x-x)<Math.abs(b.x-x)?q:b);c.list.push(text);if(m.key==='end'||m.key==='dream')c.m=m}}
+  box.innerHTML=chips.map(c=>`<span class="mk mk-${c.m.key} row${c.row}" style="left:${c.x}%" title="${esc(c.list.join('\n'))}"><svg aria-hidden="true"><use href="#${MARK_ICON[c.m.key]||'i-end'}"/></svg>${c.list.length>1?`<b class="more">+${c.list.length-1}</b>`:''}<span class="sr">${esc(c.list.join('; '))}</span></span>`).join('')}
 
 function renderAll(){const L=G.L;if(!L)return;
   $('#lifeName').textContent=`${L.name} · ${L.c.name}${L.migrated?' (родом: '+L.home.name+')':''}`;
@@ -174,7 +172,16 @@ function renderAll(){const L=G.L;if(!L)return;
   if(L.dream)rows.push(['Мечта',L.dream.title+(L.dreamGaveUp?' (отпущена)':'')]);
   if(!L.alive)rows[1]=['Итог',cap(L.status())+', '+L.cause];
   $('#nowDl').innerHTML=rows.map(r=>`<dt>${r[0]}</dt><dd>${r[0]==='Доход'||r[0]==='Доход семьи'?r[1]:esc(r[1])}</dd>`).join('');
-  renderThread();renderNbs();renderFacts();updFocusHint()}
+  renderThread();renderNbs();renderFacts();renderStage(L);updFocusHint()}
+/* портрет и фон этапа жизни; смена — плавным наложением слоёв */
+function swapLayer(box,html){const old=[...box.children];const el=document.createElement('div');el.className='layer';el.innerHTML=html;box.appendChild(el);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('on')));old.forEach(o=>{o.classList.remove('on');setTimeout(()=>o.remove(),700)})}
+const STAGE_NAME={child:'Детство',school:'Учёба',work:'Работа',old:'Старость',dead:'Конец пути'};
+function renderStage(L){const P=LR.portrait,st=L.phase();
+  const key=st+(st==='work'&&L.rural?'-r':'');
+  if(G.stageKey!==key){G.stageKey=key;swapLayer($('#sceneWrap'),P.scene(st,L.rural))}
+  const pk=L.age+'|'+L.alive;if(G.portraitKey!==pk){G.portraitKey=pk;swapLayer($('#ptWrap'),P.svg(L))}
+  $('#stageName').textContent=STAGE_NAME[st];$('#stageSub').textContent=cap(L.status());$('#stagebox').dataset.stage=st}
 
 function nbAt(n,age){const s=n.snaps;const i=Math.min(age,s.length-1);return s[i]}
 function renderNbs(){const L=G.L;$('#nbs').innerHTML=G.nbs.map(n=>{const s=nbAt(n,L.age);const dead=!s.alive;
@@ -212,7 +219,8 @@ function endLife(){const L=G.L;if(!L||G.endShown)return;G.endShown=true;closeShe
     </div>
     ${dreamHtml}
     ${G.notes.length?`<div class="card"><div class="sect-h">Ваши записи</div>${G.notes.map(n=>`<p style="margin:0 0 8px"><span class="mono muted">${n.age}</span> «${esc(n.a)}»</p>`).join('')}</div>`:''}
-    <div class="card"><div class="sect-h">Родившиеся в ту же секунду</div><ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px">${nbHtml}</ul></div>
+    <div class="card"><div class="sect-h">Доход за жизнь</div><p class="muted" style="margin:0 0 8px;font-size:13px">В месяц, по паритету покупательной способности. До первой работы — доход семьи на человека.</p><div id="incChart"></div></div>
+    <div class="card"><div class="sect-h">Линии жизни: вы и родившиеся в ту же секунду</div><div id="lifeLines"></div><ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px">${nbHtml}</ul></div>
     ${cmp}
     <div class="card" style="display:flex;flex-direction:column;gap:10px"><label for="epi" class="sect-h" style="margin:0">Несколько слов этому человеку</label><textarea id="epi" maxlength="400"></textarea><div class="row" style="justify-content:flex-start"><button class="btn primary" type="button" id="saveMem">Сохранить в мемориалы</button><span id="saved" class="muted" style="align-self:center"></span></div></div>
     <div class="row" style="justify-content:flex-start"><button class="btn-born" type="button" id="again" style="width:auto">Родиться снова</button><button class="btn" type="button" id="toMem">Мои мемориалы</button><button class="btn ghost" type="button" id="toStart">На главную</button></div>`;
@@ -224,7 +232,11 @@ function endLife(){const L=G.L;if(!L||G.endShown)return;G.endShown=true;closeShe
     list.unshift({id,name:L.name,home:L.home.name,now:L.c.name,born:L.born,age:L.age,cause:L.cause,job:L.job,kids:L.kids.length,dream:L.dream?L.dream.title:null,dreamRes:dO?dO.title:null,epi:$('#epi').value.trim(),notes:G.notes});store.set('lr.mem',list.slice(0,200));$('#saved').textContent='Сохранено';$('#saveMem').disabled=true;memCount()});
   G.savedId=null;
   $('#again').addEventListener('click',startLife);$('#toMem').addEventListener('click',()=>{renderMem();show('scrMem')});$('#toStart').addEventListener('click',()=>{memCount();show('scrStart')});
-  show('scrEnd')}
+  show('scrEnd');
+  // графики строятся после показа экрана: им нужна настоящая ширина контейнера
+  LR.charts.income($('#incChart'),L.incomeLog);
+  LR.charts.lifeLines($('#lifeLines'),[{name:L.name,sub:`вы · ${L.home.name} · ${yrs(L.age)}`,phases:L.incomeLog.map(x=>x.ph).filter(p=>p!=='dead'),age:L.age,you:true},
+    ...G.nbs.map(n=>({name:n.L.name,sub:`${n.L.home.name} · ${yrs(n.L.age)}`,phases:n.snaps.slice(0,-1).map(x=>x.ph).filter(p=>p!=='dead'),age:n.L.age}))])}
 
 /* ---------- memorials ---------- */
 function renderMem(){const list=store.get('lr.mem',[]);
