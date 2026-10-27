@@ -1,0 +1,11 @@
+{
+  "name": "birth-lottery-ai",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker — посредник между игрой и ИИ (Gemini, Claude или DeepSeek). Ключи хранятся только как секреты Worker'а.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test"
+  }
+}

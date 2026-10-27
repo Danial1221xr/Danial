@@ -287,6 +287,80 @@ const EVENTS=[
 {id:'armyBack',ages:[16,45],when:L=>L.serveLeft>0,p:()=>1,fire:L=>{L.serveLeft--;if(L.working)L.shock-=0.15;if(L.serveLeft===0)return {k:'mile',t:'Служба закончилась. Вы вернулись домой.'};return null}}
 ];
 
+/* ===== мечта в 10 лет =====
+   Игрок пишет мечту своими словами. ИИ (если подключён) разбирает её в профиль {sphere, edu, needUni, needMove, difficulty};
+   без ИИ работает простой разбор по ключевым словам. Развилки на пути к мечте пишет ИИ или шаблон,
+   но шанс каждого варианта всегда считает движок: по трудности мечты, стране, достатку и образованию. */
+const SPHERES={
+  science:{name:'наука',edu:'phd',uni:true,move:true,d:4,kw:['учён','учен','наук','исследов','физик','химик','биолог','астроном','археолог','математик','изобрета','профессор','палеонт','генетик']},
+  medicine:{name:'медицина',edu:'uni',uni:true,move:false,d:3,kw:['врач','доктор','хирург','медсест','медбрат','стоматолог','ветеринар','педиатр','фельдшер','лечить','медик']},
+  tech:{name:'техника и IT',edu:'uni',uni:true,move:true,d:3,kw:['программист','инженер','айти','it','робот','компьютер','разработчик','игры','механик','архитектор','электрик','конструктор']},
+  art:{name:'искусство',edu:'college',uni:false,move:true,d:4,kw:['художни','рисова','певиц','певец','петь','актёр','актер','актрис','музыкант','писател','поэт','танц','балер','дизайнер','режиссёр','режиссер','фотограф','рэпер','артист','звезд']},
+  sport:{name:'спорт',edu:'school',uni:false,move:true,d:5,kw:['футбол','спортсмен','боксёр','боксер','хоккеист','теннис','чемпион','олимпи','бегун','гимнаст','баскетбол','борец','шахмат','волейбол','пловец','тренер']},
+  business:{name:'бизнес',edu:'uni',uni:false,move:true,d:3,kw:['бизнес','предприним','миллионер','богат','директор','своё дело','свое дело','банкир','магазин']},
+  education:{name:'образование',edu:'uni',uni:true,move:false,d:2,kw:['учител','воспитател','преподава']},
+  law:{name:'право и государство',edu:'uni',uni:true,move:true,d:3,kw:['юрист','адвокат','судь','полицейск','полиц','президент','депутат','дипломат','следовател','прокурор','министр','детектив']},
+  service:{name:'помощь людям',edu:'college',uni:false,move:false,d:2,kw:['пожарн','спасател','повар','парикмахер','продав','официант','кондитер','визажист','швея','портн','строител','пекар']},
+  agriculture:{name:'земля и животные',edu:'school',uni:false,move:false,d:2,kw:['фермер','агроном','ферм','конюх','пастух','садовник','лошад','животн','коров','пчел']},
+  transport:{name:'дороги и небо',edu:'college',uni:false,move:true,d:3,kw:['пилот','лётчик','летчик','водител','капитан','моряк','машинист','дальнобой','космонавт','астронавт','гонщик']},
+  military:{name:'служба',edu:'college',uni:false,move:true,d:3,kw:['военн','солдат','офицер','генерал','десантник','пограничник','моряк-подводник']},
+  media:{name:'медиа',edu:'uni',uni:true,move:true,d:3,kw:['журналист','телевед','ведущ','блогер','ютуб','стример','тикток']},
+  other:{name:'своё',edu:'school',uni:false,move:false,d:3,kw:[]}
+};
+/* трудность отдельных мечт сильно отличается от сферы */
+const DREAM_HARD=[['космонавт',5],['астронавт',5],['президент',5],['звезд',5],['знаменит',5],['миллиардер',5],['миллионер',4],['олимпи',5],['чемпион',5],['пилот',4],['лётчик',4],['летчик',4],['хирург',4],['учител',2],['повар',2],['фермер',2],['продав',1],['водител',2]];
+/* быстрые варианты мечты (и мечты соседей по секунде) */
+const DREAM_PRESETS=[['врачом',8],['учителем',6],['футболистом',6],['программистом',5],['художником',4],['полицейским',4],['пилотом',3],['певцом',4],['учёным',3],['бизнесменом',4],['фермером',3],['космонавтом',2],['инженером',4],['военным',3],['ветеринаром',3],['поваром',3]];
+const FORK_AGES=[[14,16],[22,25],[35,45]];
+/* насколько вариант надёжен и насколько продвигает к мечте: [множитель шанса, прирост] */
+const KIND={study:[1.1,1],move:[0.8,1.4],risk:[0.55,2.2],safe:[1.35,0.6],network:[0.95,1.1],money:[1,1.3],give_up:[1,0]};
+/* профессия, которая сама по себе приближает к мечте */
+const MAJOR_SPHERE={med:'medicine',tech:'tech',it:'tech',edu:'education',econ:'business',law:'law'};
+
+function classifyDreamLocal(text){
+  const t=' '+String(text||'').toLowerCase().replace(/ё/g,'е')+' ';
+  let sphere='other';
+  for(const k in SPHERES)if(SPHERES[k].kw.some(w=>t.includes(w.replace(/ё/g,'е')))){sphere=k;break}
+  const S=SPHERES[sphere];let d=S.d;
+  for(const [w,v] of DREAM_HARD)if(t.includes(w.replace(/ё/g,'е'))){d=v;break}
+  let clean=String(text||'').trim().replace(/[.!]+$/,'').replace(/^(я\s+)?(хочу\s+|буду\s+|стану\s+)?(стать|быть)?\s*/i,'').slice(0,50)||String(text||'').trim().slice(0,50);
+  clean=/^[а-яё-]+(ом|ем|ой|ей|ью|ами|ями)(\s|$)/i.test(clean)?'Стать '+clean.toLowerCase():Cap(clean);
+  return {sphere,title:clean,edu:S.edu,needUni:S.uni,needMove:S.move,difficulty:d,short:`Сфера: ${S.name}.`,src:'local'};
+}
+
+/* шаблоны развилок: тексты подставляются в buildFork */
+function forkTemplate(L,stage){
+  const d=L.dream,t=d.title,x=L.age,S=SPHERES[d.sphere]||SPHERES.other;
+  if(stage===1){
+    const o=[{label:'Учиться и готовиться всерьёз',hint:'Кружки, олимпиады, книги вместо прогулок',kind:'study'},
+             {label:'Найти наставника',hint:'Человека, который уже прошёл этот путь',kind:'network'}];
+    if(['sport','art'].includes(d.sphere))o.push({label:'Тренироваться вместо учёбы',hint:'Всё или ничего',kind:'risk'});
+    o.push({label:'Забыть детскую мечту',hint:'Есть дела поважнее',kind:'give_up'});
+    return {title:'Первый шаг к мечте',text:`Вам ${yrs(x)}. В десять лет вы мечтали: «${t}». Пора решить, всерьёз ли это.`,options:o.slice(0,3)};
+  }
+  if(stage===2){
+    const o=[];
+    if(d.needUni&&!L.degree)o.push({label:'Учиться дальше по профессии',hint:'Ещё несколько лет учёбы',kind:'study'});
+    if(d.needMove&&!L.migrated)o.push({label:'Переехать туда, где больше возможностей',hint:'Большой город или другая страна',kind:'move'});
+    o.push({label:'Бросить всё ради мечты',hint:'Сейчас или никогда',kind:'risk'});
+    o.push({label:'Обычная работа, а мечта — медленно',hint:'Надёжно, но долго',kind:'safe'});
+    return {title:'Мечта и взрослая жизнь',text:`Вам ${yrs(x)}. Детская мечта — «${t}» (${S.name}). Взрослая жизнь требует денег и времени.`,options:o.slice(0,3)};
+  }
+  const o=[{label:'Рискнуть и попробовать по-настоящему',hint:'Может не получиться',kind:'risk'}];
+  if(L.zEff()>-0.3)o.push({label:'Вложить сбережения',hint:'Деньги семьи ради мечты',kind:'money'});
+  else o.push({label:'Найти единомышленников',hint:'Вместе проще',kind:'network'});
+  o.push({label:'Отпустить мечту',hint:'У жизни свои планы',kind:'give_up'});
+  return {title:'Ещё не поздно?',text:`Вам ${yrs(x)}. Когда-то вы мечтали: «${t}». Половина жизни позади.`,options:o};
+}
+
+/* итог мечты: шаблонные тексты, если ИИ недоступен */
+const DREAM_END={
+  yes:['Детская мечта сбылась.','То, о чём вы мечтали в десять лет, стало вашей жизнью.'],
+  partly:['Мечта сбылась отчасти.','Путь к мечте был долгим, и часть его вы прошли.'],
+  no:['Жизнь пошла другим путём.','Детская мечта осталась в детстве, а жизнь сложилась по-своему.'],
+  early:['Мечта не успела сбыться.','Жизнь оказалась короче, чем путь к мечте.']
+};
+
 /* ===== Life ===== */
 class Life{
   constructor(o={}){
@@ -317,6 +391,8 @@ class Life{
     this.serveLeft=0;this.served=false;this.major=null;this.college=false;this.collegeLeft=0;this.love=null;
     this.biz=null;this.housing=null;this.mortLeft=0;this.debt=0;this.caring=null;this.withKids=false;this.helpGrand=false;this.grandkids=0;
     this.exSpouse=null;this.divAge=null;this.yearRisk=1;this.retExtra=0;this.pensionBoost=1;this.careBonus=1;this.history=[];
+    /* этап 3: мечта */
+    this.dream=null;this.dreamScore=0;this.dreamWins=0;this.dreamGaveUp=false;this.forkAt=null;this.forksDone=0;
     this.sibs=poisson(Math.max(0,c.fert-1)*0.7);
     this.lines=[];
   }
@@ -404,6 +480,9 @@ class Life{
         opts:[{label:'Лечиться',hint:`Обойдётся примерно в ${months} ${plural(months,['месячный доход','месячных дохода','месячных доходов'])}`,w:tp,fn:()=>{this.illMult=1.2;this.shock-=poor?0.45:0.12;return 'Вы начали лечение.'}},
               {label:'Не лечиться',hint:'Сохранить деньги семье',w:1-tp,fn:()=>{this.illMult=1.9;return 'Вы решили не лечиться.'}}]});
     }
+    // мечта: вопрос в 10 лет и развилки в 14–16, 22–25 и 35–45 лет (вне лимита в два решения)
+    if(x===10&&!this.dream&&!this.flags.dreamAsked){this.flags.dreamAsked=true;ds.push(this.dreamQuestion())}
+    if(this.dream&&!this.dreamGaveUp&&this.forkAt&&this.forkAt[this.forksDone]===x){const st=++this.forksDone;ds.push(this.buildFork(st,forkTemplate(this,st)))}
     // выборы этапа 2: не больше двух за год, чтобы год не превращался в анкету
     let extra=0;
     if(!DEC_AGE)DEC_AGE=byAge(DECISIONS);
@@ -412,13 +491,60 @@ class Life{
   }
   autoChoice(d){return wpick(d.opts.map((o,i)=>[i,Math.max(0.0001,o.w)]))}
   resolve(d,i){const r=d.opts[i].fn();this.history.push({age:this.age,id:d.id,opt:i,label:d.opts[i].label});return r}
+  /* ---- мечта ---- */
+  dreamQuestion(){const pool=DREAM_PRESETS.slice(),pre=[];
+    while(pre.length<4){const q=wpick(pool.map(v=>[v,v[1]]));pool.splice(pool.indexOf(q),1);pre.push(q[0])}
+    return {id:'dream',input:true,stage:'мечта',title:'Кем ты хочешь стать?',text:'Вам десять лет. Напишите своими словами, кем мечтает стать этот ребёнок, или выберите вариант.',
+      opts:pre.map(v=>({label:'Стать '+v,hint:'',w:1,fn:()=>this.setDream(Object.assign(classifyDreamLocal(v),{title:'Стать '+v,text:v}))}))}}
+  setDream(p){const s=SPHERES[p.sphere]?p.sphere:'other';
+    this.dream={text:String(p.text||p.title).slice(0,200),title:String(p.title).slice(0,60),sphere:s,edu:p.edu||SPHERES[s].edu,needUni:!!p.needUni,needMove:!!p.needMove,
+      difficulty:clamp(Math.round(p.difficulty)||3,1,5),short:String(p.short||'').slice(0,240),src:p.src||'local'};
+    this.forkAt=FORK_AGES.map(([a,b])=>a+Math.floor(Math.random()*(b-a+1)));this.forksDone=0;
+    return `Мечта: ${this.dream.title}.`}
+  /* шанс варианта считает только движок: трудность мечты, страна, достаток, образование и прошлые успехи */
+  dreamChance(k){const d=this.dream,c=this.c,z=this.zEff();
+    let p=[0.8,0.68,0.55,0.42,0.3][d.difficulty-1];
+    if(d.needUni)p*=this.degree?1.25:clamp(0.35+c.tert/100,0.4,1.1);
+    p*=clamp(0.6+0.15*Math.log(c.gdp/3000),0.45,1.15);
+    p*=clamp(Math.exp(0.22*z),0.6,1.5);
+    if(d.needMove&&this.rural)p*=0.75;
+    // там, где много детских браков, у девочек меньше дорог в спорт, науку, армию и авиацию
+    if(this.sex==='f'&&c.cm>20&&['sport','military','transport','science'].includes(d.sphere))p*=0.8;
+    p*=1+0.12*Math.min(this.dreamWins,3);
+    if(k==='money')p*=z>0?1.05:0.65;
+    return clamp(p*KIND[k][0],0.03,0.95)}
+  buildFork(stage,spec){
+    const opts=spec.options.slice(0,3).map(o=>{const k=KIND[o.kind]?o.kind:'safe';
+      if(k==='give_up')return {label:o.label,hint:o.hint||'',kind:k,w:0.15,fn:()=>{this.dreamGaveUp=true;this.stress=Math.max(0,this.stress-0.5);return 'Вы отпустили детскую мечту.'}};
+      const p=this.dreamChance(k);
+      return {label:o.label,hint:`${o.hint?o.hint+' · ':''}шанс примерно ${Math.round(p*100)}%`,kind:k,chance:p,w:0.25+p*0.5,fn:()=>this.forkResult(k,p,stage)}});
+    return {id:'dreamFork',dreamFork:stage,stage:'мечта',title:spec.title,text:spec.text,opts,src:spec.src||'template'}}
+  forkResult(k,p,stage){const ok=Math.random()<p;
+    if(ok){this.dreamScore+=KIND[k][1];this.dreamWins++}else this.dreamScore-=k==='risk'?0.5:0.2;
+    if(k==='study'){this.studyPts+=2;if(stage===1)this.eduPlan=Math.min(12,this.eduPlan+1)}
+    if(k==='move'&&ok){this.rural=false;if(this.zp!==null)this.zp+=0.1}
+    if(k==='risk'){if(ok){if(this.zp!==null)this.zp+=0.15}else{this.shock-=0.3;this.stress+=1}}
+    if(k==='money'){this.shock-=0.25;if(ok&&this.zp!==null)this.zp+=0.1}
+    if(k==='network'&&ok)this.dreamWins++;
+    if(k==='safe'&&this.zp!==null)this.zp+=0.03;
+    const T={study:['Учёба дала плоды: вы стали ближе к мечте.','Вы старались, но пока это не помогло.'],move:['Переезд открыл новые двери.','Переезд не дал того, на что вы надеялись.'],
+      risk:['Риск оправдался: мечта стала ближе.','Рискнули — и проиграли. Пришлось начинать заново.'],safe:['Медленно, но вы двигаетесь к мечте.','Обычная жизнь отнимает все силы.'],
+      network:['Нужные люди помогли вам.','Помощи найти не удалось.'],money:['Вложения окупились.','Деньги ушли, а мечта не приблизилась.']}[k];
+    return ok?T[0]:T[1]}
+  dreamOutcome(){if(!this.dream)return null;let s=this.dreamScore;
+    const work=(this.major&&MAJOR_SPHERE[this.major])||(this.biz?'business':null)||(this.served&&this.dream.sphere==='military'?'military':null)||(/земл|ферм|скот|урожа/.test(this.job||'')?'agriculture':null);
+    if(work===this.dream.sphere)s+=1.5;
+    const need=2+(this.dream.difficulty-3)*0.4;
+    let key=s>=need&&!this.dreamGaveUp?'yes':s>=need*0.45?'partly':'no';
+    if(key!=='yes'&&(this.age<20||(key==='no'&&this.age<30)))key='early';
+    return {key,score:+s.toFixed(2),title:DREAM_END[key][0],text:DREAM_END[key][1]}}
   divorce(){this.married=false;this.exSpouse=this.spouse;this.divAge=this.age;this.stress+=1;return `Вы развелись с ${this.spouse}.`}
   get spouseAge(){return this.age+(this.spDiff||0)}
   marry(sp,spAge){this.married=true;this.everMarried=true;this.spouse=sp;this.spDiff=clamp(spAge,14,90)-this.age;
     if(this.sex==='f'&&this.working&&['ME','SA'].includes(this.c.region)&&Math.random()<0.55){this.working=false;this.homemaker=true}}
   pickDest(){const list=(DEST[this.c.region]||DEST.HI).map(([k,w])=>[BY[k],w]).filter(([d])=>d&&d.code!==this.c.code&&d.gdp>this.c.gdp*1.2);return list.length?wpick(list):null}
   migrate(d){if(Math.random()<0.7){const from=this.c;this.c=d;this.migrated=true;this.rural=false;this.q=getTable(d,this.sex);this.sigma=Math.SQRT2*ndtri((d.gini/100+1)/2);
-      if(this.zp!==null)this.zp=this.zp*0.5-0.6;else this.zp=-0.8;this.shock=0;return `Вы уехали. Новая страна: ${d.name}. Первое время будет трудно.`}
+      if(this.zp!==null)this.zp=this.zp*0.5-0.6;else this.zp=-0.8;this.shock=0;if(this.dream&&this.dream.needMove&&!this.dreamGaveUp)this.dreamScore+=0.5;return `Вы уехали. Новая страна: ${d.name}. Первое время будет трудно.`}
     return 'Уехать не вышло: документы не одобрили.'}
   startWork(){const c=this.c,x=this.age;let tier;
     if(this.rural&&Math.random()<clamp(c.agri/100/ruralShare(c),0,0.95))tier='agri';
@@ -541,6 +667,6 @@ function simulateFull(mode,soft){const L=new Life({auto:true,mode,soft});L.init(
   while(L.alive&&g++<130){const ds=L.beginYear();for(const d of ds)L.resolve(d,L.autoChoice(d));L.endYear();snaps.push(L.snapshot())}
   return {L,snaps}}
 
-return {COUNTRIES,BY,NAMES,DECISIONS,EVENTS,DRAFT,Life,simulateFull,getTable,e0,survTo,avgLE,avgIncome,ruralShare,pickCountry,setData,setCal:v=>{CAL=v},getCal:()=>CAL,
+return {COUNTRIES,BY,NAMES,DECISIONS,EVENTS,DRAFT,SPHERES,KIND,classifyDreamLocal,forkTemplate,Life,simulateFull,getTable,e0,survTo,avgLE,avgIncome,ruralShare,pickCountry,setData,setCal:v=>{CAL=v},getCal:()=>CAL,
   clamp,gauss,ndtri,ncdf,plural,yrs,money,pick,wpick,MAXAGE};
 });

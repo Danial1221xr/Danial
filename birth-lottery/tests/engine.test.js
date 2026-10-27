@@ -148,6 +148,66 @@ test('выбор в детстве меняет шанс закурить, но 
   assert.ok(sport > 0.05, 'даже спортсмены иногда начинают курить: ' + sport);
 });
 
+test('мечта: вопрос в 10 лет, разбор без ИИ и развилки с шансами движка', () => {
+  const d = E.classifyDreamLocal('хочу стать врачом');
+  assert.strictEqual(d.sphere, 'medicine');
+  assert.strictEqual(E.classifyDreamLocal('космонавтом').difficulty, 5);
+  let asked = 0, forks = 0, outcomes = 0;
+  for (let i = 0; i < 400; i++) {
+    const L = new E.Life({ auto: true, country: E.BY.KZ });
+    L.init();
+    let g = 0;
+    while (L.alive && g++ < 130) {
+      for (const dd of L.beginYear()) {
+        if (dd.id === 'dream') { asked++; assert.strictEqual(L.age, 10); assert.ok(dd.input && dd.opts.length >= 2); }
+        if (dd.id === 'dreamFork') {
+          forks++;
+          for (const o of dd.opts) if (o.kind !== 'give_up') assert.ok(o.chance > 0 && o.chance < 1 && /шанс примерно \d+%/.test(o.hint));
+        }
+        L.resolve(dd, L.autoChoice(dd));
+      }
+      L.endYear();
+    }
+    if (L.dreamOutcome()) outcomes++;
+  }
+  assert.ok(asked > 300 && forks > asked, `вопросов ${asked}, развилок ${forks}`);
+  assert.strictEqual(outcomes, asked);
+});
+
+test('развилка от ИИ: движок сам считает шансы, неизвестный kind не ломает игру', () => {
+  const L = new E.Life({ auto: true, country: E.BY.NO });
+  L.age = 15; L.setDream({ sphere: 'medicine', title: 'Врач', edu: 'uni', needUni: true, needMove: false, difficulty: 3, short: '' });
+  const d = L.buildFork(1, { title: 'Т', text: 'Текст', src: 'ai', options: [
+    { label: 'Учиться', hint: '', kind: 'study' }, { label: 'Рискнуть', hint: 'всё или ничего', kind: 'risk', chance: 0.99 }, { label: '???', hint: '', kind: 'fly' }] });
+  assert.strictEqual(d.src, 'ai');
+  assert.ok(d.opts[1].chance < d.opts[0].chance, 'риск менее надёжен, чем учёба, что бы ни прислал ИИ');
+  assert.strictEqual(d.opts[2].kind, 'safe');
+  assert.strictEqual(typeof L.resolve(d, 0), 'string');
+});
+
+test('мечта зависит от места рождения: «врач» в Норвегии сбывается чаще, чем в Нигере', () => {
+  const rate = code => {
+    let yes = 0, n = 0;
+    for (let i = 0; i < 1500; i++) {
+      const L = new E.Life({ auto: true, country: E.BY[code] });
+      L.init();
+      let g = 0;
+      while (L.alive && g++ < 130) {
+        for (const dd of L.beginYear()) {
+          if (dd.id === 'dream') { L.setDream(E.classifyDreamLocal('врачом')); continue; }
+          L.resolve(dd, L.autoChoice(dd));
+        }
+        L.endYear();
+      }
+      const o = L.dreamOutcome();
+      if (o) { n++; if (o.key === 'yes') yes++; }
+    }
+    return yes / n;
+  };
+  const no = rate('NO'), ne = rate('NE');
+  assert.ok(no > ne * 3, `Норвегия ${no}, Нигер ${ne}`);
+});
+
 test('соседи по секунде: снимки на каждый год', () => {
   const { L, snaps } = E.simulateFull('births', false);
   assert.strictEqual(snaps.length, L.age + 2, 'снимок при рождении и после каждого прожитого года');

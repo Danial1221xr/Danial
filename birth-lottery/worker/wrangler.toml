@@ -1,0 +1,27 @@
+# Cloudflare Worker «Лотерея рождения — ИИ». Инструкция по развёртыванию — в README игры, раздел «ИИ: мечта».
+name = "birth-lottery-ai"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Какой ИИ использовать: gemini | anthropic | deepseek
+PROVIDER = "gemini"
+# Модель. Пусто — модель по умолчанию для провайдера (gemini-2.5-flash, claude-haiku-5-5, deepseek-chat).
+MODEL = ""
+# С каких сайтов можно обращаться к Worker'у (через запятую). Впишите адрес, где лежит игра.
+ALLOWED_ORIGINS = "http://localhost:8000,http://127.0.0.1:8000"
+# Максимальная длина текста мечты, символов
+MAX_INPUT = "200"
+# Запасной лимит запросов в минуту с одного адреса (если привязка RATE_LIMITER не настроена)
+RATE_LIMIT = "8"
+
+# Ключи НЕ пишутся сюда. Они задаются секретами:
+#   npx wrangler secret put GEMINI_API_KEY
+#   npx wrangler secret put ANTHROPIC_API_KEY   (если PROVIDER = "anthropic")
+#   npx wrangler secret put DEEPSEEK_API_KEY    (если PROVIDER = "deepseek")
+
+# Ограничение частоты запросов средствами Cloudflare: 8 запросов в минуту с одного IP.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "4101"
+simple = { limit = 8, period = 60 }

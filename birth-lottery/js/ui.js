@@ -93,13 +93,52 @@ function queueYear(){const L=G.L;const ds=L.beginYear();
   if(PAUSES.includes(L.age))G.queue.push({type:'pause'});
   nextSheet();updFocusHint()}
 
+function decHtml(L,d){return `<div class="eyebrow">${yrs(L.age)} · ${esc(d.stage||'решение')}</div><h2 id="sheetTitle">${esc(d.title)}</h2><p>${esc(d.text)}</p><div class="opts">${d.opts.map((o,i)=>`<button class="opt" type="button" data-i="${i}"><b>${esc(o.label)}</b>${o.hint?`<span>${esc(o.hint)}</span>`:''}</button>`).join('')}</div>${d.src==='ai'?'<p class="ai-note">Текст развилки написал ИИ, шансы посчитала игра.</p>':''}`}
+function showDec(L,d){const card=$('#sheetCard');card.innerHTML=decHtml(L,d);
+  card.querySelectorAll('.opt').forEach(b=>b.addEventListener('click',()=>{const i=+b.dataset.i;const r=L.resolve(d,i);addFeed(L.age,{k:'choice',t:`${d.title}: ${r}`});closeSheet();renderAll();nextSheet()}));
+  const fb=card.querySelector('button');if(fb)fb.focus()}
 function nextSheet(){if(G.modal||!G.queue.length)return;const it=G.queue.shift();G.modal=true;const L=G.L;const card=$('#sheetCard');
-  if(it.type==='dec'){const d=it.d;card.innerHTML=`<div class="eyebrow">${yrs(L.age)} · ${esc(d.stage||'решение')}</div><h2 id="sheetTitle">${esc(d.title)}</h2><p>${esc(d.text)}</p><div class="opts">${d.opts.map((o,i)=>`<button class="opt" type="button" data-i="${i}"><b>${esc(o.label)}</b>${o.hint?`<span>${esc(o.hint)}</span>`:''}</button>`).join('')}</div>`;
-    card.querySelectorAll('.opt').forEach(b=>b.addEventListener('click',()=>{const i=+b.dataset.i;const r=L.resolve(d,i);addFeed(L.age,{k:'choice',t:`${d.title}: ${r}`});closeSheet();renderAll();nextSheet()}))}
+  if(it.type==='dec'){const d=it.d;const ai=window.LR.ai;
+    if(d.input)dreamSheet(L,d,card);
+    else if(d.dreamFork&&ai&&ai.available()){
+      // развилку пишет ИИ, но варианты и шансы собирает движок; при сбое остаётся шаблон
+      card.innerHTML=`<div class="eyebrow">${yrs(L.age)} · мечта</div><h2 id="sheetTitle">Жизнь подкидывает выбор…</h2><p class="muted">ИИ придумывает развилку для этой жизни.</p>`;
+      ai.writeFork(d.dreamFork,L).then(spec=>{if(G.L!==L)return;showDec(L,spec&&Array.isArray(spec.options)&&spec.options.length>=2?L.buildFork(d.dreamFork,Object.assign(spec,{src:'ai'})):d)})}
+    else showDec(L,d)}
   else{const q=pauseQ(L);card.innerHTML=`<div class="eyebrow">Пауза · ${yrs(L.age)}</div><h2 id="sheetTitle">Время остановилось</h2><p>${esc(q)}</p><label for="pauseTxt" class="muted" style="font-size:13px">Одна строчка, если хотите</label><textarea id="pauseTxt" maxlength="280"></textarea><div class="row"><button class="btn ghost" type="button" id="pSkip">Пропустить</button><button class="btn primary" type="button" id="pGo">Дальше</button></div>`;
     const fin=save=>{const v=$('#pauseTxt').value.trim();if(save&&v){G.notes.push({age:L.age,q,a:v});addFeed(L.age,{k:'note',t:`Ваша запись: «${v}»`})}closeSheet();nextSheet()};
     $('#pSkip').addEventListener('click',()=>fin(false));$('#pGo').addEventListener('click',()=>fin(true));setTimeout(()=>{const t=$('#pauseTxt');if(t)t.focus()},50)}
-  $('#sheet').hidden=false;const fb=card.querySelector('button');if(fb&&it.type==='dec')fb.focus()}
+  $('#sheet').hidden=false}
+
+/* ---------- мечта ---------- */
+const AI_WHO={gemini:'Google (Gemini)',anthropic:'Anthropic (Claude)',deepseek:'DeepSeek'};
+// грубый фильтр на случай, когда ИИ не подключён (тот же смысл, что и в Worker'е)
+const BAD=/(^|[\s«"(-])(хуй|хуе|пизд|ебат|ебал|ебан|бляд|блят|порн|секс|проститу|убийц|убить|киллер|террор|наркоторгов|нацист|самоуб|суицид|fuck|porn|kill)/i;
+function dreamSheet(L,d,card){const ai=window.LR.ai,useAI=!!(ai&&ai.available());
+  const who=AI_WHO[ai&&ai.provider()]||'Google (Gemini)';
+  card.innerHTML=`<div class="eyebrow">${yrs(L.age)} · мечта</div><h2 id="sheetTitle">${esc(d.title)}</h2><p>${esc(d.text)}</p>
+    <label for="dreamTxt" class="muted" style="font-size:13px">Своими словами</label><textarea id="dreamTxt" maxlength="200" placeholder="Например: хочу лечить животных"></textarea>
+    <p class="ai-note">${useAI?`Текст мечты отправится в ${esc(who)} через сервер игры, чтобы ИИ разобрал его. Не пишите имён, адресов и других личных данных.`:'ИИ не подключён: мечта будет разобрана простыми правилами, текст никуда не отправляется.'}</p>
+    <p class="ai-err" id="dreamErr" role="alert" hidden></p>
+    <div class="row"><button class="btn primary" type="button" id="dreamGo">Записать мечту</button></div>
+    <div class="eyebrow">или выберите</div><div class="chips">${d.opts.map((o,i)=>`<button class="chip" type="button" data-i="${i}">${esc(o.label)}</button>`).join('')}</div>`;
+  const done=(r,short)=>{if(G.L!==L)return;addFeed(L.age,{k:'mile',t:r+(short?' '+short:'')});closeSheet();renderAll();nextSheet()};
+  const err=t=>{const e=$('#dreamErr');e.textContent=t;e.hidden=false};
+  card.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>done(L.resolve(d,+b.dataset.i))));
+  const go=$('#dreamGo');
+  go.addEventListener('click',async()=>{const v=$('#dreamTxt').value.trim();
+    if(!v){$('#dreamTxt').focus();return}
+    if(BAD.test(' '+v)){err('Такую мечту записать нельзя. Попробуйте сформулировать иначе.');return}
+    go.disabled=true;go.textContent=useAI?'ИИ разбирает мечту…':'Записываем…';
+    let p=null;
+    if(useAI){const r=await ai.classifyDream(v,L);if(G.L!==L)return;
+      if(r&&r.error==='inappropriate'){go.disabled=false;go.textContent='Записать мечту';err('Такую мечту записать нельзя. Попробуйте сформулировать иначе.');return}
+      if(r&&r.title)p=Object.assign(r,{text:v,src:'ai'})}
+    if(!p)p=Object.assign(E.classifyDreamLocal(v),{text:v});
+    const res=L.setDream(p);L.history.push({age:L.age,id:'dream',opt:-1,label:'мечта: '+L.dream.title});
+    done(res,p.src==='ai'?p.short:'')});
+  setTimeout(()=>{const t=$('#dreamTxt');if(t)t.focus()},50)}
+
 function closeSheet(){$('#sheet').hidden=true;G.modal=false}
 function pauseQ(L){const c=L.c;
   if(L.age===5)return 'Этому ребёнку пять лет. Что он уже знает о мире вокруг? А что вы помните о своих пяти годах?';
@@ -132,6 +171,7 @@ function renderAll(){const L=G.L;if(!L)return;
   const home={mortgage:`ипотека, осталось ${yrs(L.mortLeft)}`,build:'строит свой дом',rent:'снимает жильё',parents:'живёт с родителями',own:'своё жильё'}[L.housing];
   const money2=[home,L.debt>0?'выплачивает кредит':'',L.biz?'своё дело':''].filter(Boolean).join(', ');
   if(money2)rows.push(['Жильё и деньги',money2]);
+  if(L.dream)rows.push(['Мечта',L.dream.title+(L.dreamGaveUp?' (отпущена)':'')]);
   if(!L.alive)rows[1]=['Итог',cap(L.status())+', '+L.cause];
   $('#nowDl').innerHTML=rows.map(r=>`<dt>${r[0]}</dt><dd>${r[0]==='Доход'||r[0]==='Доход семьи'?r[1]:esc(r[1])}</dd>`).join('');
   renderThread();renderNbs();renderFacts();updFocusHint()}
@@ -153,6 +193,8 @@ function endLife(){const L=G.L;if(!L||G.endShown)return;G.endShown=true;closeShe
   const kidsAlive=L.kids.filter(k=>k.alive).length;
   const heavy=['hom','sui'].includes(L.causeKey);
   const le=L.sex==='m'?L.home.leM:L.home.leF;
+  const dO=L.dreamOutcome();
+  const dreamHtml=dO?`<div class="card dream-end"><div class="sect-h">Мечта в 10 лет: ${esc(L.dream.title)}</div><p class="dream-res ${dO.key}"><b>${esc(dO.title)}</b></p><p id="dreamEpi" style="margin:0">${esc(dO.text)}</p><p class="ai-note" id="dreamEpiNote" hidden>Текст написал ИИ.</p></div>`:'';
   const nbHtml=G.nbs.map(n=>{const d=n.L;return `<li><b>${esc(d.name)}</b>, ${esc(d.home.name)}${d.migrated?' → '+esc(d.c.name):''}: ${d.sex==='m'?'прожил':'прожила'} ${yrs(d.age)}${d.cause?' ('+esc(d.cause)+')':''}${d.degree?', высшее образование':''}${d.kids.length?`, ${d.kids.length} ${plural(d.kids.length,['ребёнок','ребёнка','детей'])}`:''}.</li>`}).join('');
   let cmp='';if(S.real&&BY[S.real]){const r=BY[S.real];const rl=L.sex==='m'?r.leM:r.leF;
     cmp=`<div class="card cmp"><div class="sect-h">Сравнение с вашей страной</div><p style="margin:0">${cap(r.inName)} ${L.sex==='m'?'мужчины':'женщины'} живут в среднем ${yrs(rl)}, а ${L.home.inName} — ${yrs(le)}. Средний доход ${r.inName} примерно ${money(avgIncome(r))} в месяц на человека, ${L.home.inName} — ${money(avgIncome(L.home))}. До пяти лет не доживает ${(r.u5/10).toFixed(1).replace('.',',')}% детей против ${(L.home.u5/10).toFixed(1).replace('.',',')}%.</p></div>`}
@@ -168,20 +210,25 @@ function endLife(){const L=G.L;if(!L||G.endShown)return;G.endShown=true;closeShe
       <div><b>${L.peak?money(L.peak):'—'}</b><span>самый высокий доход в месяц</span></div>
       <div><b>${L.kids.length}${L.lostKids?' / −'+L.lostKids:''}</b><span>детей${L.lostKids?' / умерли в детстве':''}</span></div>
     </div>
+    ${dreamHtml}
     ${G.notes.length?`<div class="card"><div class="sect-h">Ваши записи</div>${G.notes.map(n=>`<p style="margin:0 0 8px"><span class="mono muted">${n.age}</span> «${esc(n.a)}»</p>`).join('')}</div>`:''}
     <div class="card"><div class="sect-h">Родившиеся в ту же секунду</div><ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px">${nbHtml}</ul></div>
     ${cmp}
     <div class="card" style="display:flex;flex-direction:column;gap:10px"><label for="epi" class="sect-h" style="margin:0">Несколько слов этому человеку</label><textarea id="epi" maxlength="400"></textarea><div class="row" style="justify-content:flex-start"><button class="btn primary" type="button" id="saveMem">Сохранить в мемориалы</button><span id="saved" class="muted" style="align-self:center"></span></div></div>
     <div class="row" style="justify-content:flex-start"><button class="btn-born" type="button" id="again" style="width:auto">Родиться снова</button><button class="btn" type="button" id="toMem">Мои мемориалы</button><button class="btn ghost" type="button" id="toStart">На главную</button></div>`;
+  if(dO&&window.LR.ai&&LR.ai.available()){
+    const hl=L.history.filter(h=>h.id!=='dream').slice(-6).map(h=>`${h.age} лет: ${h.label}`);
+    if(L.kids.length)hl.push(`детей: ${L.kids.length}`);if(L.migrated)hl.push(`переезд: ${L.c.name}`);
+    LR.ai.writeEpilogue(L,dO.key,hl).then(r=>{if(r&&r.text&&G.L===L&&$('#dreamEpi')){$('#dreamEpi').textContent=r.text;$('#dreamEpiNote').hidden=false}})}
   $('#saveMem').addEventListener('click',()=>{if(G.savedId)return;const list=store.get('lr.mem',[]);const id=Date.now();G.savedId=id;
-    list.unshift({id,name:L.name,home:L.home.name,now:L.c.name,born:L.born,age:L.age,cause:L.cause,job:L.job,kids:L.kids.length,epi:$('#epi').value.trim(),notes:G.notes});store.set('lr.mem',list.slice(0,200));$('#saved').textContent='Сохранено';$('#saveMem').disabled=true;memCount()});
+    list.unshift({id,name:L.name,home:L.home.name,now:L.c.name,born:L.born,age:L.age,cause:L.cause,job:L.job,kids:L.kids.length,dream:L.dream?L.dream.title:null,dreamRes:dO?dO.title:null,epi:$('#epi').value.trim(),notes:G.notes});store.set('lr.mem',list.slice(0,200));$('#saved').textContent='Сохранено';$('#saveMem').disabled=true;memCount()});
   G.savedId=null;
   $('#again').addEventListener('click',startLife);$('#toMem').addEventListener('click',()=>{renderMem();show('scrMem')});$('#toStart').addEventListener('click',()=>{memCount();show('scrStart')});
   show('scrEnd')}
 
 /* ---------- memorials ---------- */
 function renderMem(){const list=store.get('lr.mem',[]);
-  $('#memList').innerHTML=list.length?list.map(m=>`<div class="mem"><h3>${esc(m.name)}</h3><p class="mono muted" style="font-size:13px">${m.born} — ${m.born+m.age} · ${esc(m.home)}${m.now!==m.home?' → '+esc(m.now):''}</p><p>${m.age===0?'Меньше года':cap(yrs(m.age))}. ${esc(cap(m.cause||''))}.${m.job?' Работа: '+esc(m.job)+'.':''}${m.kids?' Детей: '+m.kids+'.':''}</p>${m.epi?`<p class="ep">«${esc(m.epi)}»</p>`:''}</div>`).join(''):'<p class="muted">Пока пусто. Проживите жизнь и сохраните её в конце.</p>';
+  $('#memList').innerHTML=list.length?list.map(m=>`<div class="mem"><h3>${esc(m.name)}</h3><p class="mono muted" style="font-size:13px">${m.born} — ${m.born+m.age} · ${esc(m.home)}${m.now!==m.home?' → '+esc(m.now):''}</p><p>${m.age===0?'Меньше года':cap(yrs(m.age))}. ${esc(cap(m.cause||''))}.${m.job?' Работа: '+esc(m.job)+'.':''}${m.kids?' Детей: '+m.kids+'.':''}${m.dream?' Мечта: '+esc(m.dream)+(m.dreamRes?' — '+esc(m.dreamRes.toLowerCase()):'')+'':''}</p>${m.epi?`<p class="ep">«${esc(m.epi)}»</p>`:''}</div>`).join(''):'<p class="muted">Пока пусто. Проживите жизнь и сохраните её в конце.</p>';
   $('#memClear').textContent='Стереть все записи';G.clearArm=false}
 $('#memBack').addEventListener('click',()=>{memCount();show('scrStart')});
 $('#memClear').addEventListener('click',e=>{if(!G.clearArm){G.clearArm=true;e.currentTarget.textContent='Нажмите ещё раз, чтобы стереть';return}store.set('lr.mem',[]);renderMem();memCount()});
