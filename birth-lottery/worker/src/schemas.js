@@ -6,6 +6,8 @@ export const SPHERES = ['science', 'medicine', 'tech', 'art', 'sport', 'business
 export const EDU = ['none', 'school', 'college', 'uni', 'phd'];
 export const KINDS = ['study', 'move', 'risk', 'safe', 'network', 'money', 'give_up'];
 const OUTCOMES = ['yes', 'partly', 'no', 'early'];
+// Метки эффектов бытовых событий: силу каждой задаёт движок игры, а не ИИ.
+export const TAGS = ['mood+', 'mood-', 'rel+', 'rel-', 'know+', 'know-', 'health+', 'health-', 'money+', 'money-', 'stress+', 'stress-'];
 
 const str = (v, max) => typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '';
 const int = (v, lo, hi, def) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def; };
@@ -45,7 +47,84 @@ function common(body, maxInput) {
   };
 }
 
+const tags = v => Array.isArray(v) ? [...new Set(v.filter(t => TAGS.includes(t)))].slice(0, 3) : [];
+
 export const ENDPOINTS = {
+  moments: {
+    maxTokens: 2200,
+    clean(body, maxInput) {
+      const from = int(body.ageFrom, 0, 110, -1), to = int(body.ageTo, 0, 110, -1);
+      if (from < 0 || to < from || to - from > 9) return { error: 'ages' };
+      return { ...common(body, maxInput), from, to, family: str(body.family, 240), home: str(body.home, 200), place: str(body.place, 60),
+        recent: list(body.recent, 10, 140), userText: [body.family, body.home, ...(body.recent || [])].join(' ') };
+    },
+    prompt(i) {
+      return {
+        system: [
+          'Ты пишешь обычную жизнь героя для браузерной игры-симуляции «Лотерея рождения».',
+          `Нужны события на возраст от ${i.from} до ${i.to} лет: по 1–2 на каждый год. Обязательно указывай age — возраст героя в этот год.`,
+          'Это мелкие, конкретные, живые моменты повседневности: семейный быт, еда, дом, родственники, соседи, двор, школа и учителя, друзья, игры, праздники и обычаи страны, работа, деньги, покупки, погода, местные реалии.',
+          'Учитывай страну, город или деревню, достаток семьи, условия в доме, возраст (младенец не ходит в школу, подросток спорит с родителями, взрослый думает о работе и детях).',
+          'События должны быть разными и не повторять недавние; примерно поровну хорошие, плохие и нейтральные. Пиши во втором лице на «вы», в прошедшем времени, одно-два коротких предложения (до 160 символов).',
+          'Не придумывай крупных перемен — свадеб, рождения детей, переездов, смертей, серьёзных болезней, смены работы: их решает сама игра.',
+          'tags — от нуля до трёх меток последствий из списка: mood+/mood- (настроение), rel+/rel- (отношения с близкими), know+/know- (знания), health+/health- (здоровье), money+/money- (деньги), stress+/stress- (стресс).',
+          'choices — ноль или один небольшой бытовой выбор в этом промежутке возраста: title до 6 слов, text 1–2 предложения, 2–3 варианта; у варианта label до 6 слов, result — что вышло (одно предложение), tags — последствия.',
+          DATA_NOTE, SAFETY, i.soft ? SOFT : ''
+        ].filter(Boolean).join('\n'),
+        user: `${context(i)}\n${i.place ? `Где живёт: ${i.place}.\n` : ''}${i.family ? `Семья: ${i.family}.\n` : ''}${i.home ? `Дом: ${i.home}\n` : ''}${i.recent.length ? `Недавние события (не повторять): ${i.recent.join(' | ')}` : ''}`
+      };
+    },
+    schema: {
+      type: 'object',
+      properties: {
+        events: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { age: { type: 'integer' }, text: { type: 'string' }, tags: { type: 'array', items: { type: 'string', enum: TAGS } } },
+            required: ['age', 'text', 'tags'],
+            additionalProperties: false
+          }
+        },
+        choices: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              age: { type: 'integer' }, title: { type: 'string' }, text: { type: 'string' },
+              options: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: { label: { type: 'string' }, result: { type: 'string' }, tags: { type: 'array', items: { type: 'string', enum: TAGS } } },
+                  required: ['label', 'result', 'tags'],
+                  additionalProperties: false
+                }
+              }
+            },
+            required: ['age', 'title', 'text', 'options'],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['events', 'choices'],
+      additionalProperties: false
+    },
+    validate(o, i) {
+      if (!o || typeof o !== 'object' || !Array.isArray(o.events)) return { ok: false };
+      const inRange = a => Number.isInteger(a) && a >= i.from && a <= i.to;
+      const perAge = {};
+      const events = o.events.map(e => ({ age: Math.round(Number(e && e.age)), text: str(e && e.text, 220), tags: tags(e && e.tags) }))
+        .filter(e => inRange(e.age) && e.text.length >= 8 && (perAge[e.age] = (perAge[e.age] || 0) + 1) <= 2);
+      const choices = (Array.isArray(o.choices) ? o.choices : []).slice(0, 1).map(c => ({
+        age: Math.round(Number(c && c.age)), title: str(c && c.title, 60), text: str(c && c.text, 300),
+        options: (Array.isArray(c && c.options) ? c.options : []).slice(0, 3).map(x => ({ label: str(x && x.label, 60), result: str(x && x.result, 200), tags: tags(x && x.tags) })).filter(x => x.label && x.result)
+      })).filter(c => inRange(c.age) && c.title && c.text && c.options.length >= 2);
+      if (!events.length) return { ok: false };
+      return { ok: true, value: { events, choices } };
+    }
+  },
+
   dream: {
     maxTokens: 600,
     clean(body, maxInput) {

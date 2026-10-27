@@ -141,6 +141,8 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .genbar i{display:block;height:100%;background:var(--ph-child);transition:width .6s ease}
 .feed .tag{display:inline-block;font:500 11px/1 var(--f-mono);letter-spacing:.04em;text-transform:uppercase;color:var(--bg);background:var(--muted);border-radius:6px;padding:3px 6px;margin-right:6px;vertical-align:1px}
 .feed li.world .t{color:var(--muted)}
+.feed li .a{white-space:nowrap}
+.feed li.ai .t::after{content:' ✦';font-size:10px;color:var(--muted)}
 .card .sum{grid-template-columns:repeat(2,minmax(0,1fr))}
 .parallel table{width:100%;border-collapse:collapse;font-size:14px}
 .parallel th{font-weight:500;font-size:12px;color:var(--muted);text-align:left;padding:4px 4px 6px 0}

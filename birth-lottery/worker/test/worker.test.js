@@ -158,3 +158,28 @@ test('схема для Gemini: заглавные типы, без additionalPr
   const s = toGeminiSchema({ type: 'object', additionalProperties: false, properties: { a: { type: 'array', items: { type: 'string', enum: ['x'] } } } });
   assert.deepEqual(s, { type: 'OBJECT', properties: { a: { type: 'ARRAY', items: { type: 'STRING', enum: ['x'] } } } });
 });
+
+test('бытовые события от ИИ: возраст в окне, метки из списка, не больше двух в год', async () => {
+  const out = {
+    events: [
+      { age: 3, text: 'Бабушка научила вас лепить манты, и полкухни было в муке.', tags: ['rel+', 'mood+', 'know+', 'money+'] },
+      { age: 3, text: 'Вы разбили любимую мамину чашку и спрятали осколки под диван.', tags: ['mood-', 'fly+'] },
+      { age: 3, text: 'Третье событие в тот же год должно отброситься.', tags: [] },
+      { age: 9, text: 'Вне окна возраста — отбросить.', tags: [] },
+      { age: 4, text: 'Коротко', tags: [] }
+    ],
+    choices: [{ age: 4, title: 'Котёнок у подъезда', text: 'Вы нашли котёнка. Мама против.', options: [
+      { label: 'Упросить маму', result: 'Котёнок остался.', tags: ['mood+', 'rel-'] }, { label: 'Отнести соседке', result: 'Соседка рада.', tags: ['rel+'] }] }]
+  };
+  mockFetch(() => gemini(out));
+  const r = await call(req('/moments', { ageFrom: 3, ageTo: 5, family: 'мама 25, папа 28', home: 'нет водопровода', recent: ['Вы пошли в детский сад'] }));
+  assert.equal(r.status, 200);
+  const v = await r.json();
+  assert.equal(v.events.length, 2);
+  assert.deepEqual(v.events[0].tags, ['rel+', 'mood+', 'know+']);
+  assert.deepEqual(v.events[1].tags, ['mood-']);
+  assert.equal(v.choices.length, 1);
+  assert.match(calls[0].body.contents[0].parts[0].text, /нет водопровода/);
+  assert.match(calls[0].body.systemInstruction.parts[0].text, /от 3 до 5 лет/);
+  assert.equal((await call(req('/moments', { ageFrom: 5, ageTo: 30 }))).status, 400, 'окно не больше 10 лет');
+});

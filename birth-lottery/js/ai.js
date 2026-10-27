@@ -39,6 +39,18 @@ function contextOf(L){
     status:L.status(),history:L.history.filter(h=>h.id!=='dream').slice(-8).map(h=>`${h.age} лет: ${h.label}`)};
 }
 
+/* семья и дом одной строкой — только то, что видно в игре */
+function familyOf(L){const a=L.age,p=[];
+  if(L.mom)p.push(`мама ${L.momAge+a} лет`);else p.push('мамы нет в живых');
+  if(L.dad)p.push(L.flags.dadAway?`папа ${L.dadAge+a} лет, на заработках далеко`:`папа ${L.dadAge+a} лет`);else p.push('папы нет в живых');
+  if(L.sibs)p.push(`старших братьев и сестёр: ${L.sibs}`);if(L.young)p.push(`младших: ${L.young}`);
+  if(L.married)p.push(`в браке с ${L.spouse}`);else if(L.everMarried)p.push(L.widowed?'вдов'+(L.sex==='m'?'ец':'а'):'в разводе');
+  const k=L.kids.filter(k=>k.alive).map(k=>`${k.name} (${a-k.born})`);if(k.length)p.push('дети: '+k.join(', '));
+  if(L.grandkids)p.push(`внуков: ${L.grandkids}`);if(L.flags.pet)p.push('есть питомец');if(L.flags.bf)p.push(`лучший друг: ${L.flags.bf}`);
+  return p.join('; ')}
+function homeOf(L){const h=L.home2;if(!h)return '';
+  return [h.elec?'есть электричество':'нет электричества',h.water?'есть чистая вода':'воду носят издалека',h.toilet?'есть туалет':'туалета нет',h.cook?'готовят на газе или электричестве':'готовят на дровах',h.net?'есть интернет':'интернета нет'].join(', ')}
+
 /* какой ИИ стоит за Worker'ом — чтобы честно написать игроку, куда уйдёт текст */
 let provider='gemini';
 if(endpoint())fetch(endpoint()+'/health').then(r=>r.ok?r.json():null).then(v=>{if(v&&v.provider)provider=v.provider}).catch(()=>{});
@@ -53,6 +65,8 @@ LR.ai={
   classifyDream:(text,L)=>call('/dream',{...contextOf(L),text}),
   /* развилка → {title,text,options:[{label,hint,kind}]} | null */
   writeFork:(stage,L)=>call('/fork',{...contextOf(L),stage,age:L.age,dream:{title:L.dream.title,sphere:L.dream.sphere,short:L.dream.short}}),
+  /* обычные события и бытовой выбор на возраст from..to → {events:[{age,text,tags}], choices:[...]} | null */
+  moments:(L,from,to,recent)=>call('/moments',{...contextOf(L),ageFrom:from,ageTo:to,place:`${L.rural?'деревня':'город'}, ${L.c.name}`,family:familyOf(L),home:homeOf(L),recent}),
   /* итог → {text} | null */
   writeEpilogue:(L,outcome,highlights)=>call('/epilogue',{...contextOf(L),dream:{title:L.dream.title,sphere:L.dream.sphere,short:L.dream.short},outcome,age:L.age,job:L.job||'',highlights}),
   safe

@@ -51,7 +51,7 @@ loadJSON('data/world.json').then(world=>{
 function startLife(){
   // один мир на всех, кто родился в эту секунду: те же кризисы, эпидемии и новости
   G.world=E.makeWorld(new Date().getFullYear(),Math.floor(Math.random()*4294967296));
-  G.L=new Life({mode:S.mode,soft:S.soft,world:G.world});G.notes=[];
+  G.L=new Life({mode:S.mode,soft:S.soft,world:G.world});G.notes=[];G.aiMom={};G.aiUpTo=0;G.aiBusy=false;
   G.nbs=[0,1,2,3].map(()=>simulateFull(S.mode,S.soft,G.world));
   G.yearDur=(+S.dur*60)/avgLE(G.L.c);G.acc=0;G.queue=[];G.modal=false;G.quitArm=false;G.endShown=false;
   $('#feed').innerHTML='';phase.fill(undefined);buildThread();G.stageKey=G.portraitKey=null;$('#sceneWrap').innerHTML=$('#ptWrap').innerHTML='';
@@ -76,11 +76,16 @@ function loop(ts){if(!G.L)return;const dt=Math.min(0.25,(ts-G.last)/1000);G.last
   const cur=document.querySelector('.tick.cur i');if(cur)cur.style.width=(G.L.alive?Math.min(100,G.acc/G.yearDur*100):0)+'%';
   if(G.L&&G.L.alive)requestAnimationFrame(loop)}
 
-function advanceYear(){const L=G.L,x=L.age;const ev=L.endYear();ev.forEach(e=>addFeed(x,e));
+function advanceYear(){const L=G.L,x=L.age;const m=G.aiMom[x];if(m&&m.events.length)L.aiCover.add(x);
+  const ev=L.endYear();ev.forEach(e=>addFeed(x,e));
+  // события года от ИИ (если успели прийти): эффекты — только метки, силу задаёт движок
+  if(m&&L.alive)for(const e of m.events){L.applyTags(e.tags);addFeed(x,{k:'info',t:e.text,ai:true})}
   if(!L.alive){renderAll();G.running=false;setTimeout(()=>{if(G.L===L)endLife()},1600);return}
   renderAll();queueYear()}
 const PAUSES=[5,15,30,50,70];
-function queueYear(){const L=G.L;const ds=L.beginYear();
+function queueYear(){const L=G.L;const m=G.aiMom[L.age];if(m&&m.choice)L.aiChoiceAges.add(L.age);
+  const ds=L.beginYear();if(m&&m.choice&&L.alive)ds.push(L.buildAIChoice(m.choice));
+  aiPrefetch(L);
   for(const d of ds){if(G.auto){const i=L.autoChoice(d);const r=L.resolve(d,i);addFeed(L.age,{k:'choice',t:`${d.title}: ${d.opts[i].label.toLowerCase()}. ${r}`})}else G.queue.push({type:'dec',d})}
   if(PAUSES.includes(L.age))G.queue.push({type:'pause'});
   nextSheet();updFocusHint()}
@@ -89,6 +94,15 @@ function decHtml(L,d){return `<div class="eyebrow">${yrs(L.age)} · ${esc(d.stag
 function showDec(L,d){const card=$('#sheetCard');card.innerHTML=decHtml(L,d);
   card.querySelectorAll('.opt').forEach(b=>b.addEventListener('click',()=>{const i=+b.dataset.i;const r=L.resolve(d,i);addFeed(L.age,{k:'choice',t:`${d.title}: ${r}`});closeSheet();renderAll();nextSheet()}));
   const fb=card.querySelector('button');if(fb)fb.focus()}
+/* ИИ пишет обычную жизнь заранее, на несколько лет вперёд: на высокой скорости — большими кусками */
+function aiPrefetch(L){const ai=window.LR.ai;if(!ai||!ai.available()||G.aiBusy||G.L!==L||!L.alive)return;
+  if(G.aiUpTo>=L.age+2)return;
+  const from=Math.max(L.age+1,G.aiUpTo+1),span=G.speed>=20?8:G.speed>=5?5:3,to=Math.min(from+span-1,110);
+  const recent=[...document.querySelectorAll('#feed li .t')].slice(0,8).map(t=>t.textContent.slice(0,140));
+  G.aiBusy=true;
+  ai.moments(L,from,to,recent).then(r=>{G.aiBusy=false;if(G.L!==L||!r||!Array.isArray(r.events))return;G.aiUpTo=to;
+    for(const e of r.events)(G.aiMom[e.age]=G.aiMom[e.age]||{events:[],choice:null}).events.push(e);
+    for(const c of r.choices||[])(G.aiMom[c.age]=G.aiMom[c.age]||{events:[],choice:null}).choice=c})}
 function nextSheet(){if(G.modal||!G.queue.length)return;const it=G.queue.shift();G.modal=true;const L=G.L;const card=$('#sheetCard');
   if(it.type==='dec'){const d=it.d;const ai=window.LR.ai;
     if(d.input)dreamSheet(L,d,card);
@@ -139,7 +153,7 @@ function pauseQ(L){const c=L.c;
   if(L.age===50)return 'Полвека. Что бы вы сказали этому человеку, если бы могли с ним поговорить?';
   const p=Math.round(survTo(L.home,L.sex,70)*100);return `До семидесяти лет ${L.home.inName} доживают примерно ${p}% ${L.sex==='m'?'мужчин':'женщин'}. Что для вас значит долгая жизнь?`}
 
-function addFeed(age,e){const li=document.createElement('li');li.className=e.k||'info';
+function addFeed(age,e){const li=document.createElement('li');li.className=(e.k||'info')+(e.ai?' ai':'');if(e.ai)li.title='Событие написал ИИ';
   li.innerHTML=`<span class="a">${age} ${plural(age,['год','года','лет'])}</span><div><div class="t">${e.k==='world'?'<span class="tag">Мир</span>':''}${esc(e.t)}</div>${e.help?`<div class="help">${HELP}</div>`:''}</div>`;
   const f=$('#feed');f.insertBefore(li,f.firstChild)}
 
@@ -207,7 +221,7 @@ const SRC_NAME={wpp:'ООН, WPP 2024',wdi:'Всемирный банк',bl:'Bar
 const num=(v,d)=>(d===undefined?String(v):v.toFixed(d)).replace('.',',');
 function srcNote(c,f){const s=c.src&&c.src[f];if(!s)return '';return `${SRC_NAME[s.s]||s.s}${s.y?', '+s.y:''}${s.est?' · оценка':''}`}
 function renderFacts(){const c=G.L.home;$('#factsTitle').textContent='Статистика: '+c.name;
-  const r=[[['leM','leF'],'Продолжительность жизни, муж. / жен.',`${num(c.leM)} / ${num(c.leF)}`],['u5','Не доживают до 5 лет',`${num(c.u5/10,1)}%`],['gdp','ВВП на душу (ППС), $',c.gdp.toLocaleString('ru-RU')],['gini','Индекс Джини',num(c.gini)],['school','Средние годы учёбы взрослых',num(c.school)],['tert','Охват высшим образованием',c.tert+'%'],['agri','Занятость в сельском хозяйстве',num(c.agri)+'%'],['urb','Живут в городах',c.urb+'%'],['fert','Детей на женщину',num(c.fert)],['mmr','Материнская смертность на 100 000 родов',c.mmr],['hom','Убийств на 100 000',num(c.hom)],['smoke','Курят',num(c.smoke)+'%'],['sat','Удовлетворённость жизнью (0–10)',num(c.sat)]];
+  const r=[[['leM','leF'],'Продолжительность жизни, муж. / жен.',`${num(c.leM)} / ${num(c.leF)}`],['u5','Не доживают до 5 лет',`${num(c.u5/10,1)}%`],['gdp','ВВП на душу (ППС), $',c.gdp.toLocaleString('ru-RU')],['gini','Индекс Джини',num(c.gini)],['school','Средние годы учёбы взрослых',num(c.school)],['tert','Охват высшим образованием',c.tert+'%'],['agri','Занятость в сельском хозяйстве',num(c.agri)+'%'],['urb','Живут в городах',c.urb+'%'],['fert','Детей на женщину',num(c.fert)],['mmr','Материнская смертность на 100 000 родов',c.mmr],['hom','Убийств на 100 000',num(c.hom)],['smoke','Курят',num(c.smoke)+'%'],['elec','Есть электричество (город / деревня)',`${c.elecU}% / ${c.elecR}%`],['water','Чистая питьевая вода (город / деревня)',`${c.waterU}% / ${c.waterR}%`],['sanit','Нормальный туалет (город / деревня)',`${c.sanitU}% / ${c.sanitR}%`],['net','Пользуются интернетом',c.net+'%'],['sat','Удовлетворённость жизнью (0–10)',num(c.sat)]];
   $('#factsTbl').innerHTML=r.map(([f,label,val])=>{const fs=[].concat(f);const est=fs.some(k=>c.src&&c.src[k]&&c.src[k].est);const note=[...new Set(fs.map(k=>srcNote(c,k)))].join('; ');
     return `<tr><td>${label}${note?`<div class="src">${esc(note)}</div>`:''}</td><td>${est?'≈ ':''}${val}</td></tr>`}).join('')}
 

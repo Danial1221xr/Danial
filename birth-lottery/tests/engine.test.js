@@ -4,7 +4,7 @@ const assert = require('node:assert');
 const { loadEngine } = require('../tools/load-engine');
 
 const E = loadEngine();
-const NUM = ['births', 'pop', 'leM', 'leF', 'imr', 'u5', 'gdp', 'gini', 'school', 'tert', 'agri', 'fert', 'mmr', 'hiv', 'hom', 'smoke', 'sat', 'cm', 'urb'];
+const NUM = ['births', 'pop', 'leM', 'leF', 'imr', 'u5', 'gdp', 'gini', 'school', 'tert', 'agri', 'fert', 'mmr', 'hiv', 'hom', 'smoke', 'sat', 'cm', 'urb', 'elec', 'water', 'sanit', 'cook', 'net'];
 const REGIONS = ['SA', 'EA', 'SSA', 'ME', 'LA', 'EE', 'CA', 'HI'];
 
 function live(L, choose) {
@@ -231,6 +231,26 @@ test('повседневная жизнь: все бытовые события 
   assert.deepStrictEqual(E.CHOICES.map(d => d.id).filter(id => !seenC.has(id)), [], 'бытовые выборы, которых не было');
   assert.ok(daily / years > 0.5 && daily / years < 1.01, 'примерно одно обычное событие в год: ' + daily / years);
   assert.ok(choices / years > 0.15 && choices / years < 0.4, 'бытовой выбор раз в 3–6 лет: ' + choices / years);
+});
+
+test('быт: условия в доме по статистике, интернет только при электричестве, ИИ-метки ограничены', () => {
+  let noElecNE = 0, noElecNO = 0;
+  for (let i = 0; i < 2000; i++) {
+    const a = new E.Life({ auto: true, country: E.BY.NE }), b = new E.Life({ auto: true, country: E.BY.NO });
+    if (!a.home2.elec) noElecNE++; if (!b.home2.elec) noElecNO++;
+    assert.ok(a.home2.elec || !a.home2.net);
+  }
+  assert.ok(noElecNE / 2000 > 0.5 && noElecNO / 2000 < 0.02, `без света: Нигер ${noElecNE / 2000}, Норвегия ${noElecNO / 2000}`);
+  const L = new E.Life({ auto: true });
+  const before = { mood: L.mood, rel: L.rel };
+  L.applyTags(['mood+', 'mood+', 'mood+', 'mood+', 'rel-', 'hack']);
+  assert.ok(L.mood - before.mood <= 15, 'не больше трёх меток');
+  const d = L.buildAIChoice({ title: 'Т', text: 'Текст', options: [{ label: 'А', result: 'Вышло', tags: ['money+'] }, { label: 'Б', result: 'Иначе', tags: [] }] });
+  assert.strictEqual(d.opts.length, 2);
+  assert.match(d.opts[0].hint, /деньги ↑/);
+  assert.strictEqual(L.resolve(d, 0), 'Вышло');
+  const L2 = new E.Life({ auto: true }); L2.init(); L2.aiCover.add(0);
+  assert.ok(!L2.endYear().some(e => e.daily), 'год, покрытый ИИ, без шаблонного события');
 });
 
 test('мир один для всех, кто родился в одну секунду', () => {

@@ -240,7 +240,7 @@ function byAge(list){const idx=[];for(let x=0;x<=MAXAGE;x++)idx.push(list.filter
 let DEC_AGE=null,EV_AGE=null,CH_AGE=null,DAY_AGE=null;
 /* взвешенный выбор из списка по весам w(L,x,c) без лишних массивов: симуляция крутит его миллионы раз */
 const WBUF=new Float64Array(128);
-function pickWeighted(list,L,x,c){let tot=0;for(let i=0;i<list.length;i++){const w=list[i].w(L,x,c);WBUF[i]=w>0?w:0;tot+=WBUF[i]}
+function pickWeighted(list,L,x,c){let tot=0;for(let i=0;i<list.length;i++){let w=list[i].w(L,x,c);if(w>0){const n=L.seen[list[i].id];if(n)w*=Math.pow(0.2,n)}WBUF[i]=w>0?w:0;tot+=WBUF[i]}
   if(tot<=0)return null;let r=Math.random()*tot;for(let i=0;i<list.length;i++){r-=WBUF[i];if(r<=0&&WBUF[i]>0)return list[i]}
   for(let i=list.length-1;i>=0;i--)if(WBUF[i]>0)return list[i];return null}
 
@@ -563,6 +563,79 @@ function worldIncomePctl(monthly){
   let s=0,t=0;for(const [c,sg] of SIG){const mean=c.gdp*0.55*(calOf(c).ki||1)/12;s+=c.pop*ncdf((Math.log(Math.max(1,monthly)/mean)+sg*sg/2)/sg);t+=c.pop}
   return Math.round(s/t*100)}
 
+/* --- семейный быт, ещё больше обычной жизни --- */
+const KIND_LIST=DAILY;
+KIND_LIST.push(
+{id:'teething',ages:[0,1],w:()=>1,fire:L=>{L.adj({rel:1});return {k:'info',t:'У вас резались зубы: родители месяц не спали ночами.'}}},
+{id:'lullaby',ages:[0,3],w:(L,x,c)=>['SA','ME','CA','SSA','EA','EE'].includes(c.region)?1:0.5,fire:L=>{L.adj({rel:3});return {k:'info',t:pick(['Бабушка пела вам колыбельные — те же, что пела маме.','Засыпали вы только под папину сказку про волка.'])}}},
+{id:'babyBath',ages:[0,1],w:L=>L.home2&&!L.home2.water?2:0,fire:L=>({k:'info',t:'Купали вас в тазике: воду носили издалека и грели на огне.'})},
+{id:'firstHaircut',ages:[1,3],w:()=>0.8,fire:L=>({k:'info',t:'Первая стрижка: вы рыдали, а мама сохранила локон в конверте.'})},
+{id:'shoulders',ages:[1,5],w:L=>L.dad?1:0,fire:L=>{L.adj({rel:3,mood:3});return {k:'info',t:'На праздниках папа носил вас на плечах — так было видно всё.'}}},
+{id:'darkFear',ages:[3,7],w:()=>0.8,fire:L=>({k:'info',t:L.home2&&!L.home2.elec?'Вы боялись темноты, а свет в доме был только от свечи.':'Вы боялись темноты и спали только с включённым ночником.'})},
+{id:'cartoons',ages:[2,8],w:L=>L.home2&&L.home2.elec?1:0,fire:L=>{L.adj({mood:3});return {k:'info',t:'Любимый мультик вы смотрели каждый день, пока родители не выучили его наизусть.'}}},
+{id:'helpCook',ages:[4,9],w:()=>0.9,fire:(L,x,c)=>{L.adj({rel:2});return {k:'info',t:`Вы помогали маме лепить ${{CA:'манты',SA:'лепёшки',ME:'лепёшки',EA:'пельмени',EE:'пирожки',LA:'тортильи',SSA:'лепёшки',HI:'печенье'}[c.region]||'пирожки'} — больше муки было на вас, чем на тесте.`}}},
+{id:'yardKids',ages:[3,11],w:L=>L.rural?0.6:1,fire:L=>{L.adj({mood:3,rel:2});return {k:'info',t:L.rural?'С соседскими детьми вы целыми днями пропадали у реки.':'Во дворе целая компания детей: прятки и догонялки до темноты.'}}},
+{id:'firstSnow',ages:[2,6],w:(L,x,c)=>['EE','CA','HI'].includes(c.region)?1:0,fire:L=>{L.adj({mood:4});return {k:'info',t:'Первый снег, который вы запомнили: снеговик получился кривой, но свой.'}}},
+{id:'rainSeason',ages:[2,10],w:(L,x,c)=>['SSA','SA','EA','LA'].includes(c.region)?1:0,fire:L=>{L.adj({mood:2});return {k:'info',t:'Сезон дождей: двор превратился в море, а вы — в мокрого моряка.'}}},
+{id:'sweets',ages:[3,8],w:()=>0.7,fire:L=>{L.adj({mood:2,rel:-1});return {k:'info',t:'Вы тайком съели все конфеты, припасённые к празднику. Влетело.'}}},
+{id:'carryWater',ages:[5,14],w:L=>L.home2&&!L.home2.water?2:0,fire:L=>{L.adj({rel:1,mood:-2});return {k:'info',t:'Каждое утро вы с мамой ходите за водой — далеко и тяжело.'}}},
+{id:'noLight',ages:[6,15],w:L=>L.home2&&!L.home2.elec&&L.inSchool?2:0,fire:L=>{L.adj({know:-1});return {k:'info',t:'Уроки приходится делать засветло: вечером в доме нет света.'}}},
+{id:'smoke',ages:[0,10],w:L=>L.home2&&!L.home2.cook?1.2:0,fire:L=>{L.adj({hp:-0.004});return {k:'info',t:'В доме всегда пахнет дымом: еду готовят на дровах и угле.'}}},
+{id:'handMeDowns',ages:[4,14],w:L=>L.sibs>0&&L.zf<0?1.2:0,fire:L=>({k:'info',t:'Вы донашиваете одежду за старшими. Новые вещи — только по праздникам.'})},
+{id:'newShoes',ages:[5,14],w:L=>L.zf<-0.3?1:0,fire:L=>{L.adj({mood:4});return {k:'info',t:'Новые ботинки купили впервые за три года. Вы берегли их как сокровище.'}}},
+{id:'tvEvening',ages:[3,12],w:L=>L.home2&&L.home2.elec?0.8:0,fire:L=>{L.adj({rel:2});return {k:'info',t:'По вечерам вся семья смотрит один сериал и спорит, кто прав.'}}},
+{id:'dadAway',ages:[3,15],w:(L,x,c)=>L.dad&&L.zf<0&&['CA','SA','LA','SSA','EE'].includes(c.region)?0.7:0,fire:L=>{L.adj({rel:-3,mood:-3,shock:0.05});L.flags.dadAway=true;return {k:'info',t:'Папа уехал на заработки далеко от дома. Теперь вы видите его раз в год.'}}},
+{id:'grandmaHome',ages:[0,12],w:(L,x,c)=>['SA','ME','CA','SSA','EA'].includes(c.region)?0.8:0.3,fire:L=>{L.adj({rel:3});return {k:'info',t:'С вами живёт бабушка: она главная по кухне, сказкам и строгости.'}}},
+{id:'animals',ages:[4,13],w:L=>L.rural?1.2:0,fire:L=>{L.adj({rel:1});return {k:'info',t:pick(['Вам доверили следить за курами. Вы дали каждой имя.','Каждое утро вы выгоняете коз на пастбище.','Вы научились запрягать осла и очень этим гордитесь.'])}}},
+{id:'uniform',ages:[6,7],w:L=>L.eduPlan>0&&L.zf<0?1.5:0,fire:L=>({k:'info',t:'К школе мама купила форму и тетради на последние деньги.'})},
+{id:'readSigns',ages:[5,8],w:()=>0.8,fire:L=>{L.adj({know:2});return {k:'info',t:'Вы научились читать сами — по вывескам магазинов на улице.'}}},
+{id:'cousins',ages:[3,14],w:()=>0.8,fire:L=>{L.adj({mood:4,rel:2});return {k:'info',t:'Приехали двоюродные братья и сёстры — неделю дом стоял вверх дном.'}}},
+{id:'momSick',ages:[5,15],w:L=>L.mom?0.5:0,fire:L=>{L.adj({rel:2,mood:-2});return {k:'info',t:'Мама слегла с простудой, и неделю вы сами готовили завтрак на всех.'}}},
+{id:'familyPhoto',ages:[0,10],w:()=>0.5,fire:L=>({k:'info',t:'Сделали первое фото всей семьи. Оно до сих пор висит на стене.'})},
+{id:'diary',ages:[11,16],w:()=>0.6,fire:L=>({k:'info',t:'Вы завели дневник и прятали его под матрасом.'})},
+{id:'haircut',ages:[13,17],w:()=>0.6,fire:L=>{L.adj({mood:2,rel:-1});return {k:'info',t:'Вы сделали смелую стрижку. Родители не оценили, друзья — в восторге.'}}},
+{id:'gaming',ages:[10,18],w:L=>L.home2&&L.home2.net?1:0,fire:L=>{L.adj({mood:3,know:-1});return {k:'info',t:'Вы ночами играли в компьютерные игры, а утром спали на уроках.'}}},
+{id:'kitchenTalk',ages:[20,95],w:L=>L.married?0.7:0,fire:L=>{L.adj({rel:3,mood:2});return {k:'info',t:`Лучшие разговоры с ${L.spouse} — ночью на кухне, за чаем.`}}},
+{id:'diy',ages:[25,70],w:()=>0.5,fire:L=>{L.adj({mood:2,shock:0.02});return {k:'info',t:'Всё лето делали ремонт своими руками. Обои немного криво, зато сами.'}}},
+{id:'feastCook',ages:[25,85],w:()=>0.5,fire:L=>{L.adj({rel:2});return {k:'info',t:'На праздник вы готовили на двадцать человек и два дня мыли посуду.'}}},
+{id:'commute',ages:[20,64],w:L=>L.working&&!L.rural?0.6:0,fire:L=>{L.adj({mood:-2,stress:0.3});return {k:'info',t:'Дорога на работу — полтора часа в одну сторону. Вы выучили все остановки.'}}},
+{id:'salaryLate',ages:[18,64],w:(L,x,c)=>L.working&&!L.biz&&(c.gdp<15000||L.zEff()<-0.3)?0.6:0,fire:L=>{L.adj({shock:-0.1,mood:-4});return {k:'info',t:'Зарплату задержали на два месяца. Жили в долг у соседей.'}}},
+{id:'bonus',ages:[20,64],w:L=>L.working?0.5:0,fire:L=>{L.adj({shock:0.08,mood:4});return {k:'info',t:'Неожиданная премия к празднику. Купили всем подарки.'}}},
+{id:'kidWord',ages:[16,70],w:L=>kidName(L,1,2)?1:0,fire:L=>{const k=kidName(L,1,2);L.adj({mood:5});return {k:'info',t:`${k.name} ${heShe(k,'сказал','сказала')} первое слово. Конечно, «${pick(['мама','папа','дай'])}».`}}},
+{id:'kidDrawing',ages:[18,75],w:L=>kidName(L,4,7)?0.8:0,fire:L=>{const k=kidName(L,4,7);L.adj({mood:4});return {k:'info',t:`${k.name} ${heShe(k,'нарисовал','нарисовала')} всю семью. У вас на рисунке огромные уши.`}}},
+{id:'teenKid',ages:[28,80],w:L=>kidName(L,14,17)?0.8:0,fire:L=>{const k=kidName(L,14,17);L.adj({mood:-2,rel:-1});return {k:'info',t:`${k.name} почти не разговаривает с вами и всё время в телефоне. Возраст такой.`}}},
+{id:'scamCall',ages:[40,95],w:(L,x,c)=>c.gdp>5000?0.5:0,fire:L=>({k:'info',t:'Позвонили «из банка» и попросили код из СМС. Вы вовремя бросили трубку.'})},
+{id:'oldSong',ages:[35,95],w:()=>0.5,fire:L=>{L.adj({mood:3});return {k:'info',t:'По радио играла песня вашей юности. Весь день ходили с улыбкой.'}}},
+{id:'doctorQueue',ages:[55,105],w:()=>0.5,fire:L=>{L.adj({mood:-2});return {k:'info',t:'Полдня в очереди к врачу. Зато узнали все новости района.'}}},
+{id:'pensionRaise',ages:[63,105],w:L=>L.retired?0.6:0,fire:(L,x,c)=>{L.adj({mood:c.gdp>15000?2:-1});return {k:'info',t:c.gdp>15000?'Пенсию немного проиндексировали.':'Пенсии хватает только на хлеб и лекарства. Помогают дети.'}}},
+{id:'grandSummer',ages:[50,95],w:L=>L.grandkids>0?0.8:0,fire:L=>{L.adj({mood:5,stress:0.2});return {k:'info',t:'Внуки всё лето жили у вас. Устали, но счастливы.'}}}
+);
+
+/* Быт семьи при рождении: электричество, вода, туалет, чистое топливо для готовки, интернет — по доле в городе или деревне.
+   Внутри страны удобств чаще нет у бедных семей: место в очереди — по достатку семьи с примесью случайности. */
+function homeAccess(L,c,key){const v=c[key+(L.rural?'R':'U')]!=null?c[key+(L.rural?'R':'U')]:c[key];if(v==null)return true;
+  const rank=ncdf((L.zf+(L.rural?0.35:0)+0.6*gauss())/1.17);return rank>1-clamp(v/100,0,1)}
+function makeHome(L,c){const h={elec:homeAccess(L,c,'elec'),water:homeAccess(L,c,'water'),toilet:homeAccess(L,c,'sanit'),cook:homeAccess(L,c,'cook'),net:homeAccess(L,c,'net')};if(!h.elec)h.net=false;return h}
+function homeText(L,c){const h=L.home2,a=[];
+  const n=2+L.sibs+1+(['SA','ME','CA','SSA','EA'].includes(c.region)&&Math.random()<0.5?1+Math.floor(Math.random()*2):0);
+  const rooms=clamp(Math.round(1+ncdf(L.zf)*3+(L.rural?0.5:0)),1,5);
+  a.push(`В доме ${n} ${plural(n,['человек','человека','человек'])} и ${rooms} ${plural(rooms,['комната','комнаты','комнат'])}.`);
+  if(!h.elec)a.push('Электричества нет: вечером сидят при свече или фонарике.');
+  if(!h.water)a.push(L.rural?'Воду носят из реки или колодца далеко от дома.':'Чистой воды в доме нет — её покупают или носят из колонки.');
+  else if(h.water&&ncdf(L.zf)>0.5&&c.gdp>8000)a.push('Есть водопровод и горячая вода.');
+  if(!h.toilet)a.push('Нормального туалета нет — только яма во дворе.');
+  if(!h.cook)a.push('Еду готовят на дровах или угле прямо в доме.');
+  if(h.net)a.push('Дома есть интернет.');
+  return a.join(' ')}
+/* удобства со временем появляются: страны развиваются, люди переезжают */
+EVENTS.push({id:'homeUpgrade',ages:[0,112],when:L=>L.home2&&(!L.home2.elec||!L.home2.water||!L.home2.toilet||!L.home2.cook||!L.home2.net),p:(L,x,c)=>clamp(0.06+0.08*ncdf(L.zEff())+(c.gdp>10000?0.06:0),0.03,0.25),
+  fire:(L,x,c)=>{const h=L.home2;const miss=['elec','water','toilet','cook','net'].filter(k=>!h[k]&&(k!=='net'||h.elec));if(!miss.length)return null;const k=miss[0]==='net'&&miss.length>1&&Math.random()<0.5?miss[1]:miss[0];h[k]=true;
+    L.adj({mood:5});return {k:'mile',t:{elec:'В дом провели электричество! Первый вечер все сидели и смотрели на лампочку.',water:'В дом провели воду. Больше не нужно носить вёдра.',toilet:'Во дворе построили настоящий туалет.',cook:'Купили газовую плиту — в доме больше нет дыма.',net:'Дома появился интернет.'}[k]}}});
+
+/* ИИ: готовые бытовые события и выборы. Эффекты — только из фиксированного набора, их величину задаёт движок. */
+const TAG_FX={'mood+':{mood:5},'mood-':{mood:-5},'rel+':{rel:4},'rel-':{rel:-4},'know+':{know:3},'know-':{know:-2},'health+':{hp:0.008},'health-':{hp:-0.008},'money+':{shock:0.06},'money-':{shock:-0.06},'stress+':{stress:0.5},'stress-':{stress:-0.5}};
+const TAG_TEXT={'mood+':up('настроение'),'mood-':down('настроение'),'rel+':up('отношения'),'rel-':down('отношения'),'know+':up('знания'),'know-':down('знания'),'health+':up('здоровье'),'health-':down('здоровье'),'money+':up('деньги'),'money-':down('деньги'),'stress+':up('стресс'),'stress-':down('стресс')};
+
 /* ===== Life ===== */
 class Life{
   constructor(o={}){
@@ -601,6 +674,8 @@ class Life{
     this.know=0;this.mood=0;this.hp=0;this.young=0;this.marriedAt=null;
     this.rel=Math.round(clamp(60+8*this.zf-(this.sibs>4?5:0),25,90));
     this.world=o.world||makeWorld(this.born,Math.floor(Math.random()*4294967296));
+    /* быт семьи и защита от повторов; aiCover / aiChoiceAges — годы, для которых события и выборы пишет ИИ */
+    this.home2=makeHome(this,c);this.home2.r0=this.rural;this.home2.c0=c.code;this.seen={};this.aiCover=new Set();this.aiChoiceAges=new Set();
     this.sibs=poisson(Math.max(0,c.fert-1)*0.7);
     this.lines=[];
   }
@@ -633,6 +708,8 @@ class Life{
     if(this.withKids||this.helpGrand)m*=0.96;
     m*=this.careBonus*this.yearRisk;
     if(x>=5)m*=Math.exp(-this.hp);
+    else if(this.home2){const c=this.c,h=this.home2,f=(has,share,k)=>has?1/(1+k*(1-share)):(1+k)/(1+k*(1-share));
+      m*=f(h.water,(c.water||100)/100,0.15)*f(h.toilet,(c.sanit||100)/100,0.1)*f(h.cook,(c.cook||100)/100,0.08)}
     return m;
   }
   qNow(x){const qb=this.q[Math.min(x,MAXAGE)];const k=x>=5?this.cal[this.sex]:1;return qb>=1?1:1-Math.pow(1-qb,this.mult(x)*k)}
@@ -641,6 +718,7 @@ class Life{
     ev.push({k:'mile',t:`Вы родились ${c.inName}, ${this.rural?'в деревне':'в городе'}. ${this.g('Мальчик','Девочка')}, вас назвали ${this.name}.`});
     const inc=this.incomeAt(this.zf),p=Math.round(ncdf(this.zf)*100);
     ev.push({k:'info',t:`Семья живёт примерно на ${money(inc)} в месяц на человека (по паритету покупательной способности). ${p<50?`Беднее, чем ${100-p}% семей страны.`:`Богаче, чем ${p}% семей страны.`}`});
+    ev.push({k:'info',t:homeText(this,c)});
     ev.push({k:'info',t:`Маме ${yrs(this.momAge)}, папе ${yrs(this.dadAge)}. ${this.sibs?`У вас ${this.sibs} ${plural(this.sibs,['старший брат или сестра','старших брата или сестры','старших братьев и сестёр'])}.`:'Вы первый ребёнок в семье.'}`});
     const n=Math.round(1000/c.u5);
     ev.push({k:'stat',t:`${c.inName[0].toUpperCase()+c.inName.slice(1)} примерно ${n<=40?`каждый ${n}-й ребёнок`:`один ребёнок из ${n}`} не доживает до пяти лет.`});
@@ -704,15 +782,21 @@ class Life{
     if(this.dream&&!this.dreamGaveUp&&this.forkAt&&this.forkAt[this.forksDone]===x){const st=++this.forksDone;ds.push(this.buildFork(st,forkTemplate(this,st)))}
     // выборы этапа 2: не больше двух за год, чтобы год не превращался в анкету
     let extra=0;
-    if(this.alive&&x>=8&&Math.random()<0.32){if(!CH_AGE)CH_AGE=byAge(CHOICES);
+    if(this.alive&&x>=8&&!this.aiChoiceAges.has(x)&&Math.random()<0.32){if(!CH_AGE)CH_AGE=byAge(CHOICES);
       const C=pickWeighted(CH_AGE[Math.min(x,MAXAGE)],this,x,c);
-      if(C){const d=C.make(this,x,c);if(d){d.everyday=true;ds.push(d)}}}
+      if(C){const d=C.make(this,x,c);if(d){this.seen[C.id]=(this.seen[C.id]||0)+1;d.everyday=true;ds.push(d)}}}
     if(!DEC_AGE)DEC_AGE=byAge(DECISIONS);
     for(const D of DEC_AGE[Math.min(x,MAXAGE)]){if(extra>=2)break;if(!this.alive||!D.when(this,x,c))continue;const d=D.make(this,x,c);if(d){d.stage=D.stage;ds.push(d);extra++}}
     return ds;
   }
   autoChoice(d){return wpick(d.opts.map((o,i)=>[i,Math.max(0.0001,o.w)]))}
   resolve(d,i){const r=d.opts[i].fn();this.history.push({age:this.age,id:d.id,opt:i,label:d.opts[i].label});return r}
+  /* ИИ: применить метки эффектов (не больше трёх) */
+  applyTags(tags){for(const t of (tags||[]).slice(0,3))if(TAG_FX[t])this.adj(TAG_FX[t])}
+  /* ИИ: бытовой выбор из готового текста; эффекты — только метки, их сила задана движком */
+  buildAIChoice(spec){return {id:'aiChoice',stage:'жизнь',src:'ai',everyday:true,title:String(spec.title).slice(0,60),text:String(spec.text).slice(0,300),
+    opts:spec.options.slice(0,3).map(o=>({label:String(o.label).slice(0,60),hint:(o.tags||[]).slice(0,3).map(t=>TAG_TEXT[t]).filter(Boolean).join(' · '),w:1,
+      fn:()=>{this.applyTags(o.tags);return String(o.result||'Решено.').slice(0,200)}}))}}
   /* ключевое событие на нити жизни */
   mark(key,label){this.marks.push({age:this.age,key,label})}
   /* фаза жизни: детство, учёба, работа, старость */
@@ -843,9 +927,11 @@ class Life{
     // знания растут от учёбы и работы
     this.adj({know:(x>=3&&x<6&&this.zf>-0.5?1.5:0)+(this.inSchool?3.5+(this.focus==='study'?1.5:0):0)+(this.uni?5:0)+(this.college?4:0)+(this.working?0.4+(this.degree?0.4:0):0)-(x>70?0.3:0)});
     // одно обычное событие года (у детей чаще)
-    if(Math.random()<(x<18?0.8:x<65?0.65:0.6)){if(!DAY_AGE)DAY_AGE=byAge(DAILY);
+    if(!this.aiCover.has(x)&&Math.random()<(x<18?0.85:x<65?0.7:0.65)){if(!DAY_AGE)DAY_AGE=byAge(DAILY);
       const D=pickWeighted(DAY_AGE[Math.min(x,MAXAGE)],this,x,c);
-      if(D){const e=D.fire(this,x,c);if(e){e.id=D.id;e.daily=true;ev.push(e)}}}
+      if(D){this.seen[D.id]=(this.seen[D.id]||0)+1;const e=D.fire(this,x,c);if(e){e.id=D.id;e.daily=true;ev.push(e)}}}
+    // переехали — в новом месте бывают удобства, которых не было
+    if(this.home2&&(this.home2.r0!==this.rural||this.home2.c0!==this.c.code)){const h=this.home2,n=makeHome(this,this.c);for(const k of ['elec','water','toilet','cook','net'])h[k]=h[k]||n[k];h.r0=this.rural;h.c0=this.c.code}
     // что происходит в мире
     for(const w of this.world.at(this.born+x)){const e={k:'world',t:w.t,id:'world'};
       if(w.fx==='crisis'){this.shock-=0.25;if(this.working&&Math.random()<0.12){this.shock-=0.4;this.stress+=1;e.t+=' Вы потеряли работу.'}}
@@ -918,6 +1004,6 @@ function simulateFull(mode,soft,world){const L=new Life({auto:true,mode,soft,wor
   while(L.alive&&g++<130){const ds=L.beginYear();for(const d of ds)L.resolve(d,L.autoChoice(d));L.endYear();snaps.push(L.snapshot())}
   return {L,snaps}}
 
-return {DAILY,CHOICES,makeWorld,setWorld,cohortSurvival,worldBirths,worldIncomePctl,incomeIn,COUNTRIES,BY,NAMES,DECISIONS,EVENTS,DRAFT,SPHERES,KIND,classifyDreamLocal,forkTemplate,Life,simulateFull,getTable,e0,survTo,avgLE,avgIncome,ruralShare,pickCountry,setData,setCal:v=>{CAL=v},getCal:()=>CAL,
+return {TAG_FX,homeText,DAILY,CHOICES,makeWorld,setWorld,cohortSurvival,worldBirths,worldIncomePctl,incomeIn,COUNTRIES,BY,NAMES,DECISIONS,EVENTS,DRAFT,SPHERES,KIND,classifyDreamLocal,forkTemplate,Life,simulateFull,getTable,e0,survTo,avgLE,avgIncome,ruralShare,pickCountry,setData,setCal:v=>{CAL=v},getCal:()=>CAL,
   clamp,gauss,ndtri,ncdf,plural,yrs,money,pick,wpick,MAXAGE};
 });

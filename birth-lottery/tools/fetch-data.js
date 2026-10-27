@@ -63,9 +63,21 @@ const WDI = {
   hom:   { ind: 'VC.IHR.PSRC.P5', orig: 'UNODC', min: 2012, dp: 1 },
   smoke: { ind: 'SH.PRV.SMOK', orig: 'WHO GHO', min: 2015, dp: 1 },
   cm:    { ind: 'SP.M18.2024.FE.ZS', orig: 'UNICEF', min: 2005, dp: 1 },
-  urb:   { ind: 'SP.URB.TOTL.IN.ZS', orig: 'UN World Urbanization Prospects', min: 2015, dp: 0 }
+  urb:   { ind: 'SP.URB.TOTL.IN.ZS', orig: 'UN World Urbanization Prospects', min: 2015, dp: 0 },
+  // быт: доля людей с электричеством, чистой водой, туалетом, чистым топливом для готовки и интернетом (город / деревня)
+  elec:  { ind: 'EG.ELC.ACCS.ZS', orig: 'World Bank / SE4ALL', min: 2015, dp: 0 },
+  elecU: { ind: 'EG.ELC.ACCS.UR.ZS', orig: 'World Bank / SE4ALL', min: 2015, dp: 0 },
+  elecR: { ind: 'EG.ELC.ACCS.RU.ZS', orig: 'World Bank / SE4ALL', min: 2015, dp: 0 },
+  water: { ind: 'SH.H2O.BASW.ZS', orig: 'WHO/UNICEF JMP', min: 2015, dp: 0 },
+  waterU:{ ind: 'SH.H2O.BASW.UR.ZS', orig: 'WHO/UNICEF JMP', min: 2015, dp: 0 },
+  waterR:{ ind: 'SH.H2O.BASW.RU.ZS', orig: 'WHO/UNICEF JMP', min: 2015, dp: 0 },
+  sanit: { ind: 'SH.STA.BASS.ZS', orig: 'WHO/UNICEF JMP', min: 2015, dp: 0 },
+  sanitU:{ ind: 'SH.STA.BASS.UR.ZS', orig: 'WHO/UNICEF JMP', min: 2015, dp: 0 },
+  sanitR:{ ind: 'SH.STA.BASS.RU.ZS', orig: 'WHO/UNICEF JMP', min: 2015, dp: 0 },
+  cook:  { ind: 'EG.CFT.ACCS.ZS', orig: 'WHO', min: 2015, dp: 0 },
+  net:   { ind: 'IT.NET.USER.ZS', orig: 'ITU', min: 2015, dp: 0 }
 };
-const ORDER = ['births', 'pop', 'leM', 'leF', 'imr', 'u5', 'gdp', 'gini', 'school', 'tert', 'agri', 'fert', 'mmr', 'hiv', 'hom', 'smoke', 'sat', 'cm', 'urb'];
+const ORDER = ['births', 'pop', 'leM', 'leF', 'imr', 'u5', 'gdp', 'gini', 'school', 'tert', 'agri', 'fert', 'mmr', 'hiv', 'hom', 'smoke', 'sat', 'cm', 'urb', 'elec', 'elecU', 'elecR', 'water', 'waterU', 'waterR', 'sanit', 'sanitU', 'sanitR', 'cook', 'net'];
 // Если в регионе нет ни одного значения, для этих полей ставится 0 (например, детские браки в богатых странах).
 const ZERO_IF_EMPTY = new Set(['cm', 'hiv']);
 
@@ -236,7 +248,7 @@ async function wpp(name) {
     meta: {
       generated: new Date().toISOString().slice(0, 10),
       note: 'Сгенерировано tools/fetch-data.js. Не редактируйте вручную — правьте tools/country-meta.js и перезапустите скрипт.',
-      units: { births: 'тыс. в год', pop: 'млн', leM: 'лет', leF: 'лет', imr: 'на 1000 рождений', u5: 'на 1000 рождений', gdp: 'ВВП на душу, ППС, межд. $ текущих цен', gini: 'индекс 0–100', school: 'лет', tert: '% (валовой охват)', agri: '% занятых', fert: 'детей на женщину', mmr: 'на 100 000 рождений', hiv: '% 15–49 лет', hom: 'на 100 000', smoke: '% 15+ (стандартизовано по возрасту)', sat: '0–10', cm: '% женщин 20–24, вышедших замуж до 18', urb: '% населения' },
+      units: { births: 'тыс. в год', pop: 'млн', leM: 'лет', leF: 'лет', imr: 'на 1000 рождений', u5: 'на 1000 рождений', gdp: 'ВВП на душу, ППС, межд. $ текущих цен', gini: 'индекс 0–100', school: 'лет', tert: '% (валовой охват)', agri: '% занятых', fert: 'детей на женщину', mmr: 'на 100 000 рождений', hiv: '% 15–49 лет', hom: 'на 100 000', smoke: '% 15+ (стандартизовано по возрасту)', sat: '0–10', cm: '% женщин 20–24, вышедших замуж до 18', urb: '% населения', elec: '% с электричеством (U — город, R — деревня)', water: '% с базовым доступом к питьевой воде', sanit: '% с базовыми санитарными условиями', cook: '% готовят на чистом топливе', net: '% пользуются интернетом' },
       sources: SOURCES
     },
     countries: ordered

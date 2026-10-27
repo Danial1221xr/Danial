@@ -6,6 +6,7 @@
 // POST /dream     — разбор мечты 10-летнего героя
 // POST /fork      — развилка на пути к мечте (шансы считает игра)
 // POST /epilogue  — короткий итог в конце жизни
+// POST /moments   — обычные события и бытовой выбор на несколько лет вперёд
 // GET  /health    — проверка, что Worker жив (без секретов)
 import { ENDPOINTS } from './schemas.js';
 import { callModel, providerOf, ProviderError } from './providers.js';
@@ -90,7 +91,7 @@ export default {
       return reply({ error: 'internal' }, 500, origin);
     }
 
-    const v = ep.validate(out);
+    const v = ep.validate(out, input);
     if (!v.ok) return reply({ error: v.error || 'bad_output' }, v.error === 'inappropriate' ? 422 : 502, origin);
     if (!outputIsSafe(v.value, input.soft)) return reply({ error: 'unsafe_output' }, 502, origin);
     return reply(v.value, 200, origin);
