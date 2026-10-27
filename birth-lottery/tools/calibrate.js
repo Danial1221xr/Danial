@@ -92,6 +92,8 @@ function simulate(n) {
       const ratio = ((r.m.inc + r.f.inc) / 2) / (c.gdp * 0.55 / 12);
       if (ratio > 0 && it > 0) CAL[k].ki /= ratio; // доход подгоняется после того, как zb устоялся
     }
+    // поправки сохраняются после каждой итерации: если прогон прервут, работа не пропадёт
+    if (!last && !CHECK) saveCal();
     console.log(`${last ? 'Проверка' : 'Итерация ' + (it + 1) + '/' + (SCHEDULE.length - 1)}: ${SCHEDULE[it]} жизней на пол (${Math.round((Date.now() - t0) / 1000)} с)`);
   }
 
@@ -116,9 +118,15 @@ function simulate(n) {
     `\n\nМаксимальное отклонение возраста смерти: ${worstAge.toFixed(2)} года\nМаксимальное отклонение дохода: ${(worstInc * 100).toFixed(1)}%\n`);
 
   if (!CHECK) {
-    const out = {};
-    for (const k in CAL) if (E0.BY[k]) out[k] = { m: +CAL[k].m.toFixed(3), f: +CAL[k].f.toFixed(3), zb: +CAL[k].zb.toFixed(3), ki: +CAL[k].ki.toFixed(3) };
-    fs.writeFileSync(CAL_FILE, JSON.stringify(out) + '\n');
+    saveCal();
     console.log('Поправки записаны в data/cal.json');
   }
 })();
+
+function saveCal() {
+  {
+    const out = {};
+    for (const k in CAL) if (E0.BY[k]) out[k] = { m: +CAL[k].m.toFixed(3), f: +CAL[k].f.toFixed(3), zb: +CAL[k].zb.toFixed(3), ki: +CAL[k].ki.toFixed(3) };
+    fs.writeFileSync(CAL_FILE, JSON.stringify(out) + '\n');
+  }
+}
