@@ -94,7 +94,7 @@ function queueYear(){const L=G.L;const ds=L.beginYear();
   nextSheet();updFocusHint()}
 
 function nextSheet(){if(G.modal||!G.queue.length)return;const it=G.queue.shift();G.modal=true;const L=G.L;const card=$('#sheetCard');
-  if(it.type==='dec'){const d=it.d;card.innerHTML=`<div class="eyebrow">${yrs(L.age)} · решение</div><h2 id="sheetTitle">${esc(d.title)}</h2><p>${esc(d.text)}</p><div class="opts">${d.opts.map((o,i)=>`<button class="opt" type="button" data-i="${i}"><b>${esc(o.label)}</b>${o.hint?`<span>${esc(o.hint)}</span>`:''}</button>`).join('')}</div>`;
+  if(it.type==='dec'){const d=it.d;card.innerHTML=`<div class="eyebrow">${yrs(L.age)} · ${esc(d.stage||'решение')}</div><h2 id="sheetTitle">${esc(d.title)}</h2><p>${esc(d.text)}</p><div class="opts">${d.opts.map((o,i)=>`<button class="opt" type="button" data-i="${i}"><b>${esc(o.label)}</b>${o.hint?`<span>${esc(o.hint)}</span>`:''}</button>`).join('')}</div>`;
     card.querySelectorAll('.opt').forEach(b=>b.addEventListener('click',()=>{const i=+b.dataset.i;const r=L.resolve(d,i);addFeed(L.age,{k:'choice',t:`${d.title}: ${r}`});closeSheet();renderAll();nextSheet()}))}
   else{const q=pauseQ(L);card.innerHTML=`<div class="eyebrow">Пауза · ${yrs(L.age)}</div><h2 id="sheetTitle">Время остановилось</h2><p>${esc(q)}</p><label for="pauseTxt" class="muted" style="font-size:13px">Одна строчка, если хотите</label><textarea id="pauseTxt" maxlength="280"></textarea><div class="row"><button class="btn ghost" type="button" id="pSkip">Пропустить</button><button class="btn primary" type="button" id="pGo">Дальше</button></div>`;
     const fin=save=>{const v=$('#pauseTxt').value.trim();if(save&&v){G.notes.push({age:L.age,q,a:v});addFeed(L.age,{k:'note',t:`Ваша запись: «${v}»`})}closeSheet();nextSheet()};
@@ -128,7 +128,10 @@ function renderAll(){const L=G.L;if(!L)return;
   const rows=[['Где',`${L.rural?'Деревня':'Город'}, ${L.c.name}`],['Занятие',cap(L.status())],['Семья',cap(L.family())],
     [L.zp===null||L.homemaker?'Доход семьи':'Доход',`<span class="mono">${money(inc)}</span> в месяц <div class="pct">${p<50?`беднее ${100-p}% людей страны`:`богаче ${p}% людей страны`}</div>`],
     ['Учёба',L.degree?'высшее образование':L.eduDone?`${L.eduDone} ${plural(L.eduDone,['класс','класса','классов'])}`:(L.age<7?'ещё рано':'не учился')],
-    ['Здоровье',[L.smoker?'курит':'',L.ill?(L.illMult<1.5?'лечится: ':'болеет: ')+L.ill:''].filter(Boolean).join(', ')||'без серьёзных проблем']];
+    ['Здоровье',[L.smoker?'курит':'',L.drinker?'часто выпивает':'',L.active&&L.age>=7?'занимается спортом':'',L.ill?(L.illMult<1.5?'лечится: ':'болеет: ')+L.ill:''].filter(Boolean).join(', ')||'без серьёзных проблем']];
+  const home={mortgage:`ипотека, осталось ${yrs(L.mortLeft)}`,build:'строит свой дом',rent:'снимает жильё',parents:'живёт с родителями',own:'своё жильё'}[L.housing];
+  const money2=[home,L.debt>0?'выплачивает кредит':'',L.biz?'своё дело':''].filter(Boolean).join(', ');
+  if(money2)rows.push(['Жильё и деньги',money2]);
   if(!L.alive)rows[1]=['Итог',cap(L.status())+', '+L.cause];
   $('#nowDl').innerHTML=rows.map(r=>`<dt>${r[0]}</dt><dd>${r[0]==='Доход'||r[0]==='Доход семьи'?r[1]:esc(r[1])}</dd>`).join('');
   renderThread();renderNbs();renderFacts();updFocusHint()}

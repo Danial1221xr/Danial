@@ -101,6 +101,53 @@ test('страна выпадает по доле рождений', () => {
   assert.ok(Math.abs(cnt[big.code] / n - share) < 0.015, `${big.code}: ${cnt[big.code] / n} vs ${share}`);
 });
 
+test('этап 2: не меньше 25 новых решений и 20 событий, и все они встречаются', () => {
+  assert.ok(E.DECISIONS.length >= 25, 'решений: ' + E.DECISIONS.length);
+  assert.ok(E.EVENTS.length >= 20, 'событий: ' + E.EVENTS.length);
+  const seenD = new Set(), seenE = new Set();
+  for (let i = 0; i < 6000 && (seenD.size < E.DECISIONS.length || seenE.size < E.EVENTS.length); i++) {
+    const L = new E.Life({ auto: true });
+    L.init();
+    let g = 0;
+    while (L.alive && g++ < 130) {
+      for (const d of L.beginYear()) { seenD.add(d.id); L.resolve(d, L.autoChoice(d)); }
+      for (const e of L.endYear()) if (e.id) seenE.add(e.id);
+    }
+  }
+  const missD = E.DECISIONS.map(d => d.id).filter(id => !seenD.has(id));
+  const missE = E.EVENTS.map(e => e.id).filter(id => !seenE.has(id));
+  assert.deepStrictEqual(missD, [], 'решения, которые ни разу не выпали');
+  assert.deepStrictEqual(missE, [], 'события, которые ни разу не произошли');
+});
+
+test('курение и алкоголь — только события, а не выбор', () => {
+  // ни одно решение не включает привычку напрямую — только события с вероятностью
+  for (const d of E.DECISIONS) {
+    const src = String(d.make);
+    assert.ok(!/smoker\s*=\s*true|drinker\s*=\s*true/.test(src), 'решение ' + d.id + ' не должно включать привычку');
+  }
+  assert.ok(E.EVENTS.some(e => e.id === 'smokeStart') && E.EVENTS.some(e => e.id === 'drinkStart'));
+});
+
+test('выбор в детстве меняет шанс закурить, но не определяет его', () => {
+  const runs = (crowd, active) => {
+    let n = 0;
+    const c = E.BY.RU;
+    for (let i = 0; i < 4000; i++) {
+      const L = new E.Life({ auto: true, country: c });
+      L.sex = 'm'; L.crowd = crowd; L.active = active; L.flags.crowd = true; L.flags.club = true;
+      L.init();
+      let g = 0;
+      while (L.alive && L.age < 31 && g++ < 40) { for (const d of L.beginYear()) L.resolve(d, L.autoChoice(d)); L.endYear(); }
+      if (L.smoker) n++;
+    }
+    return n / 4000;
+  };
+  const street = runs('street', false), sport = runs('study', true);
+  assert.ok(street > sport * 1.5, `двор ${street} против секции ${sport}`);
+  assert.ok(sport > 0.05, 'даже спортсмены иногда начинают курить: ' + sport);
+});
+
 test('соседи по секунде: снимки на каждый год', () => {
   const { L, snaps } = E.simulateFull('births', false);
   assert.strictEqual(snaps.length, L.age + 2, 'снимок при рождении и после каждого прожитого года');

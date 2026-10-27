@@ -3,6 +3,7 @@
 //                        node tools/calibrate.js --check    (только проверка текущих поправок)
 //                        node tools/calibrate.js --only KZ,RU --n 4000
 //                        node tools/calibrate.js --reset    (начать с нуля, а не с текущих поправок)
+//                        node tools/calibrate.js --start 20000 --iter 1   (дошлифовать уже близкие поправки на больших выборках)
 // Нужен после любых изменений данных стран или правил смертности/дохода.
 // Для каждой страны и пола симулирует тысячи жизней и подгоняет:
 //   m, f — множитель смертности, чтобы средний возраст смерти ≈ ожидаемая продолжительность жизни − 0,5;
@@ -54,7 +55,8 @@ const CHECK = args.includes('--check');
 // Размер выборки растёт от итерации к итерации; последний прогон только измеряет итог (поправки уже не меняет).
 const N = +(opt('--n') || 30000);
 const ITER = +(opt('--iter') || 5);
-const SCHEDULE = CHECK ? [N] : [...Array.from({ length: ITER }, (_, i) => Math.round(Math.min(N, 2000 * 2 ** i))), N];
+const START = +(opt('--start') || 2000);
+const SCHEDULE = CHECK ? [N] : [...Array.from({ length: ITER }, (_, i) => Math.round(Math.min(N, START * 2 ** i))), N];
 const THREADS = Math.max(1, Math.min(+(opt('--threads') || os.cpus().length), 16));
 
 const E0 = loadEngine();
