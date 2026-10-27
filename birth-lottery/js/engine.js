@@ -124,8 +124,8 @@ const DECISIONS=[
 {id:'club',ages:[7,10],stage:'детство',when:(L,x)=>x>=7&&x<=10&&L.inSchool&&!L.flags.club&&Math.random()<0.5,make:(L,x,c)=>{L.flags.club=true;
   const can=clamp(0.25+0.6*ncdf(L.zEff())-(L.rural?0.15:0),0.05,0.95);
   return {id:'club',title:'Кружок или секция',text:can<0.4?'При школе есть бесплатная секция, но после уроков нужно помогать дома.':'Родители готовы записать вас в кружок или спортивную секцию.',
-    opts:[opt('Спортивная секция','Здоровье и привычка двигаться',can*0.55,()=>{L.active=true;return 'Вы занимаетесь спортом.'}),
-          opt('Кружок: музыка, рисование, техника','Больше интереса к учёбе',can*0.45,()=>{L.studyPts+=2;L.flags.hobby=true;return 'Вы ходите в кружок.'}),
+    opts:[opt('Спортивная секция','Здоровье и привычка двигаться',can*0.55,()=>{addHobby(L,'sport');return 'Вы занимаетесь спортом.'}),
+          opt('Кружок: музыка, рисование, техника','Больше интереса к учёбе',can*0.45,()=>{L.studyPts+=2;L.flags.hobby=true;const k=pick(['music','art','tech','chess','dance']);addHobby(L,k);return `Вы ходите в кружок: ${SKILLS[k].hobby}.`}),
           opt('Не нужно','Свободное время и сэкономленные деньги',1-can,()=>'Вы обошлись без кружков.')]}}},
 {id:'helpFamily',ages:[9,13],stage:'детство',when:(L,x)=>x>=9&&x<=13&&L.inSchool&&!L.flags.helpFamily&&L.zf<0&&Math.random()<0.35,make:(L,x,c)=>{L.flags.helpFamily=true;
   const w=clamp(0.3+0.4*c.agri/100+(L.rural?0.15:0)-0.15*L.zf,0.1,0.9),pe=clamp(0.25+0.3*c.school/12,0.2,0.6);
@@ -434,7 +434,7 @@ const DAILY=[
 {id:'newTech',ages:[45,85],w:()=>0.5,fire:L=>{L.adj({know:2});return {k:'info',t:'Вы освоили новую технику — дети терпеливо объясняли каждую кнопку.'}}},
 /* --- старость --- */
 {id:'garden',ages:[60,95],w:L=>L.rural?1.2:0.5,fire:L=>{L.adj({mood:5,hp:0.005});return {k:'info',t:'Вы целыми днями в огороде. Урожай раздаёте соседям.'}}},
-{id:'lonely',ages:[65,105],w:L=>!L.married&&!L.withKids?1:0,fire:L=>{L.adj({mood:-6});return {k:'info',t:'Зимой было одиноко: дети звонят редко, друзей становится меньше.'}}},
+{id:'lonely',ages:[65,105],w:L=>!L.married&&!L.withKids?(L.hobbies.length?0.5:1):0,fire:L=>{L.adj({mood:-6});return {k:'info',t:'Зимой было одиноко: дети звонят редко, друзей становится меньше.'}}},
 {id:'grandVisit',ages:[50,100],w:L=>L.grandkids>0?1.3:0,fire:L=>{L.adj({mood:7,rel:3});return {k:'info',t:'Приезжали внуки. В доме было шумно и хорошо.'}}},
 {id:'jubilee',ages:[60,100],w:L=>L.age%10===0?4:0,fire:L=>{L.adj({mood:6,rel:2});return {k:'mile',t:`Юбилей — ${yrs(L.age)}. Собрались родные и старые друзья.`}}},
 {id:'oldFriend',ages:[70,105],w:()=>0.6,fire:L=>{L.adj({mood:-6});return {k:'sad',t:'Не стало старого друга. Вы долго перебирали ваши общие фотографии.'}}},
@@ -480,7 +480,7 @@ const CHOICES=[
           opt('Нет времени','',0.55,()=>'Вы отказались: и так не хватает времени.')]})},
 {id:'language',ages:[14,50],w:()=>0.6,make:L=>{const p=clamp(0.35+L.know/120,0.2,0.9);
   return {id:'language',stage:'учёба',title:'Иностранный язык',text:'Можно по вечерам учить английский. Это долго, но открывает двери.',
-    opts:[opt('Учить по вечерам',`${up('знания')} · доводят до конца примерно ${pct(p)}`,0.4,()=>{if(Math.random()<p){L.adj({know:6});if(L.zp!==null)L.zp+=0.04;L.flags.lang=true;return 'Через год вы уже смотрите фильмы без перевода.'}L.adj({know:2});return 'Вы бросили через три месяца, но кое-что запомнили.'}),
+    opts:[opt('Учить по вечерам',`${up('знания')} · доводят до конца примерно ${pct(p)}`,0.4,()=>{if(Math.random()<p){L.adj({know:6});if(L.zp!==null)L.zp+=0.04;L.flags.lang=true;L.skills.lang=Math.max(L.skills.lang||0,35);return 'Через год вы уже смотрите фильмы без перевода.'}L.adj({know:2});return 'Вы бросили через три месяца, но кое-что запомнили.'}),
           opt('Не сейчас','',0.6,()=>'Как-нибудь потом.')]}}},
 {id:'gym',ages:[20,60],w:L=>L.active?0:0.6,make:L=>({id:'gym',stage:'здоровье',title:'Спорт',text:'Друзья зовут по вечерам играть в футбол или ходить в спортзал.',
     opts:[opt('Записаться',`${up('здоровье')} · ${up('друзья')}`,0.4,()=>{L.active=true;L.adj({hp:0.015,rel:2,shock:-0.02});return 'Теперь два вечера в неделю — спорт.'}),
@@ -561,7 +561,7 @@ function worldBirths(){return COUNTRIES.reduce((s,c)=>s+c.births,0)}
 function worldIncomePctl(monthly){
   if(!SIG)SIG=COUNTRIES.map(c=>[c,Math.SQRT2*ndtri((c.gini/100+1)/2)]);
   let s=0,t=0;for(const [c,sg] of SIG){const mean=c.gdp*0.55*(calOf(c).ki||1)/12;s+=c.pop*ncdf((Math.log(Math.max(1,monthly)/mean)+sg*sg/2)/sg);t+=c.pop}
-  return Math.round(s/t*100)}
+  return clamp(Math.round(s/t*100),1,99)}
 
 /* --- семейный быт, ещё больше обычной жизни --- */
 const KIND_LIST=DAILY;
@@ -636,6 +636,109 @@ EVENTS.push({id:'homeUpgrade',ages:[0,112],when:L=>L.home2&&(!L.home2.elec||!L.h
 const TAG_FX={'mood+':{mood:5},'mood-':{mood:-5},'rel+':{rel:4},'rel-':{rel:-4},'know+':{know:3},'know-':{know:-2},'health+':{hp:0.008},'health-':{hp:-0.008},'money+':{shock:0.06},'money-':{shock:-0.06},'stress+':{stress:0.5},'stress-':{stress:-0.5}};
 const TAG_TEXT={'mood+':up('настроение'),'mood-':down('настроение'),'rel+':up('отношения'),'rel-':down('отношения'),'know+':up('знания'),'know-':down('знания'),'health+':up('здоровье'),'health-':down('здоровье'),'money+':up('деньги'),'money-':down('деньги'),'stress+':up('стресс'),'stress-':down('стресс')};
 
+/* ===== навыки и увлечения =====
+   Навык растёт, пока им занимаются (увлечение), и от работы; без практики медленно забывается.
+   Увлечения поднимают настроение, сильные навыки дают подработку, помогают в профессии и на пути к мечте. */
+const SKILLS={
+  sport:{name:'Спорт',hobby:'спорт',sphere:'sport',active:true,need:()=>true,
+    lv:['Вы пробежали первый километр без остановки.','Вас взяли в сборную района.','Вы выиграли областные соревнования. О вас написали в местной газете.']},
+  music:{name:'Музыка',hobby:'музыка',sphere:'art',need:L=>L.zf>-1,
+    lv:['Вы выучили первые аккорды — пальцы болят, но звучит!','Вы играете на всех семейных праздниках.','Вы выступили на большом концерте. Зал аплодировал стоя.']},
+  art:{name:'Рисование',hobby:'рисование',sphere:'art',need:()=>true,
+    lv:['Ваш рисунок повесили на стену в школе.','Ваши картины взяли на городскую выставку.','Вашу картину купили — первый настоящий покупатель!']},
+  dance:{name:'Танцы',hobby:'танцы',sphere:'art',active:true,need:()=>true,
+    lv:['Вы выучили первый танец целиком.','На свадьбах теперь все ждут, когда вы выйдете танцевать.','Ваша группа победила на танцевальном конкурсе.']},
+  cook:{name:'Кулинария',hobby:'готовка',sphere:'service',need:()=>true,
+    lv:['Вы впервые сами приготовили обед на всю семью.','Ваши блюда просят рецепт у вас на каждом празднике.','Соседи заказывают у вас торты и угощения на праздники.']},
+  tech:{name:'Техника и ремонт',hobby:'ремонт техники',sphere:'tech',need:()=>true,
+    lv:['Вы починили сломанное радио — сами!','К вам несут чинить технику со всей улицы.','Вы можете собрать и починить почти что угодно.']},
+  code:{name:'Программирование',hobby:'программирование',sphere:'tech',need:L=>L.home2&&L.home2.net,
+    lv:['Вы написали первую программу — она вывела «Привет, мир».','Вы сделали свою игру, и друзья в неё играют.','Ваше приложение скачали тысячи людей.']},
+  lang:{name:'Иностранные языки',hobby:'иностранный язык',sphere:'law',need:()=>true,
+    lv:['Вы впервые поняли песню на иностранном языке.','Вы свободно переписываетесь с людьми из другой страны.','Вы говорите на иностранном языке почти как на родном.']},
+  read:{name:'Чтение',hobby:'книги',sphere:'science',need:()=>true,
+    lv:['Вы прочитали первую толстую книгу.','Библиотекарь знает вас по имени и откладывает новинки.','Вы прочитали больше тысячи книг. Друзья спрашивают у вас совета, что почитать.']},
+  garden:{name:'Сад и огород',hobby:'огород',sphere:'agriculture',need:()=>true,
+    lv:['Ваши первые помидоры выросли и даже покраснели.','Ваш огород — лучший на улице.','Урожая столько, что вы продаёте его на рынке.']},
+  craft:{name:'Рукоделие',hobby:'рукоделие',sphere:'service',need:()=>true,
+    lv:['Вы связали первый шарф — кривой, но тёплый.','Вы шьёте одежду всей семье.','Ваши изделия покупают на ярмарках.']},
+  chess:{name:'Шахматы',hobby:'шахматы',sphere:'science',need:()=>true,
+    lv:['Вы впервые обыграли дедушку в шахматы.','Вы получили разряд по шахматам.','Вы выиграли турнир, где играли взрослые мастера.']},
+  photo:{name:'Фотография',hobby:'фотография',sphere:'media',need:L=>L.zf>-0.5||(L.home2&&L.home2.net),
+    lv:['Вы сделали фотографию, которой гордитесь.','Вас зовут фотографировать на свадьбы друзей.','Ваш снимок напечатали в журнале.']},
+  fish:{name:'Рыбалка',hobby:'рыбалка',sphere:'agriculture',need:()=>true,
+    lv:['Вы поймали первую рыбу — маленькую, но свою.','Вы знаете все рыбные места в округе.','Вы поймали рыбину, о которой говорил весь посёлок.']},
+  social:{name:'Общение',hobby:null,need:()=>true,
+    lv:['Вы легко заводите друзей в любом месте.','К вам идут за советом и чтобы просто поговорить.','Вас знает и уважает весь район.']}
+};
+/* какие навыки растут сами от работы */
+const JOB_SKILL=[[/повар|кулинар/,'cook'],[/электрик|техник|механик|инженер|строител|рабоч/,'tech'],[/программист/,'code'],[/продав|торгов|кассир|экономист|своё дело/,'social'],[/земл|ферм|урожа|скот/,'garden'],[/учител|врач|медсестр|юрист|администратор/,'social'],[/швея/,'craft']];
+const SKILL_KEYS=Object.keys(SKILLS);
+function hobbyOptions(L,n){return SKILL_KEYS.filter(k=>SKILLS[k].hobby&&!L.hobbies.includes(k)&&SKILLS[k].need(L)).sort(()=>Math.random()-0.5).slice(0,n)}
+function addHobby(L,k){if(!L.hobbies.includes(k)){L.hobbies.push(k);if(L.hobbies.length>3)L.hobbies.shift();L.skills[k]=L.skills[k]||0;if(SKILLS[k].active)L.active=true}}
+
+/* выборы про увлечения */
+CHOICES.push(
+{id:'newHobby',ages:[10,80],w:L=>L.hobbies.length<3?1.1:0.2,make:L=>{const ks=hobbyOptions(L,3);if(ks.length<2)return null;
+  return {id:'newHobby',stage:'увлечения',title:'Новое увлечение',text:'Хочется чем-то заняться для души. Что попробовать?',
+    opts:[...ks.map(k=>opt(Cap(SKILLS[k].hobby),`${up('настроение')} · растёт навык «${SKILLS[k].name}»`,1,()=>{addHobby(L,k);L.adj({mood:4});return `Теперь ваше увлечение — ${SKILLS[k].hobby}.`})),
+          opt('Некогда','Работа и дом отнимают всё время',0.5,()=>'Увлечения подождут.')]}}},
+{id:'hobbyMoney',ages:[16,75],w:L=>L.hobbies.some(k=>L.skills[k]>=60)?1:0,make:L=>{const k=L.hobbies.find(k=>L.skills[k]>=60);
+  return {id:'hobbyMoney',stage:'увлечения',title:'Увлечение может кормить',text:`У вас здорово получается: ${SKILLS[k].hobby}. Знакомые предлагают за это платить.`,
+    opts:[opt('Брать заказы',`${up('деньги')} · ${up('стресс')}`,0.5,()=>{L.adj({shock:0.15,stress:0.4});if(L.zp!==null)L.zp+=0.06;L.flags.sideJob=k;return 'Теперь у вас есть подработка. Деньги не лишние.'}),
+          opt('Оставить для души',up('счастье'),0.5,()=>{L.adj({mood:4});return 'Пусть это остаётся радостью, а не работой.'})]}}},
+{id:'competition',ages:[8,70],w:L=>L.hobbies.some(k=>L.skills[k]>=40)?0.9:0,make:L=>{const k=L.hobbies.find(k=>L.skills[k]>=40);const p=clamp(0.15+L.skills[k]/130,0.15,0.85);
+  return {id:'competition',stage:'увлечения',title:'Конкурс',text:`Объявили конкурс: ${SKILLS[k].hobby}. Участвуют все желающие.`,
+    opts:[opt('Участвовать',`побеждают примерно ${pct(p)} таких, как вы`,0.6,()=>{if(Math.random()<p){L.adj({mood:10,shock:0.05});L.skills[k]=Math.min(100,L.skills[k]+5);L.mark('win','Победа: '+SKILLS[k].hobby);return 'Вы победили! Грамота висит на стене.'}L.adj({mood:-3});L.skills[k]=Math.min(100,L.skills[k]+2);return 'Не победили, но многому научились.'}),
+          opt('Не участвовать','Не люблю соревноваться',0.4,()=>'Вы решили просто заниматься для себя.')]}}},
+{id:'noTime',ages:[22,60],w:L=>L.hobbies.length&&L.working&&(L.kids.some(k=>k.alive&&L.age-k.born<10)||L.stress>=1.5)?0.9:0,make:L=>{const k=L.hobbies[0];
+  return {id:'noTime',stage:'увлечения',title:'Не хватает времени',text:`Работа, дом, дети — на ${SKILLS[k].hobby} совсем не остаётся сил.`,
+    opts:[opt('Бросить на время',`${down('стресс')} · навык забудется`,0.5,()=>{L.hobbies=L.hobbies.filter(h=>h!==k);L.adj({stress:-0.5,mood:-3});return 'Вы отложили увлечение до лучших времён.'}),
+          opt('Вставать на час раньше',`${down('здоровье')} · ${up('счастье')}`,0.5,()=>{L.adj({hp:-0.008,mood:3});return 'Час до рассвета — только ваш.'})]}}},
+{id:'teachKid',ages:[25,85],w:L=>L.hobbies.length&&(kidName(L,6,16)||L.grandkids)?0.7:0,make:L=>{const k=L.hobbies[0],kid=kidName(L,6,16);
+  return {id:'teachKid',stage:'увлечения',title:'Передать умение',text:`${kid?kid.name:'Внук'} с интересом смотрит, как вы занимаетесь: ${SKILLS[k].hobby}.`,
+    opts:[opt('Научить',`${up('отношения')} · ${up('счастье')}`,0.7,()=>{L.adj({rel:5,mood:5});return 'Теперь вы занимаетесь этим вместе.'}),
+          opt('Пусть ищет своё','',0.3,()=>'У каждого своё увлечение.')]}}},
+{id:'buyGear',ages:[12,75],w:L=>L.hobbies.length&&L.zp!==null?0.5:0,make:L=>{const k=L.hobbies[0];
+  return {id:'buyGear',stage:'увлечения',title:'Дорогая покупка',text:`Для увлечения (${SKILLS[k].hobby}) нужна хорошая вещь — инструмент, форма или снаряжение. Стоит заметных денег.`,
+    opts:[opt('Купить',`${down('деньги')} · навык растёт быстрее`,0.5,()=>{L.adj({shock:-0.1,mood:4});L.skills[k]=Math.min(100,L.skills[k]+6);return 'Новая вещь — и дело пошло быстрее.'}),
+          opt('Обойтись старым','',0.5,()=>'Старое ещё послужит.')]}}}
+);
+
+/* обычные события, с которых начинается увлечение, и ещё немного жизни */
+DAILY.push(
+{id:'chessGrandpa',ages:[5,12],w:L=>L.skills.chess?0:0.6,fire:L=>{addHobby(L,'chess');L.adj({rel:3});return {k:'info',t:'Дедушка научил вас играть в шахматы. Теперь вы каждый вечер просите партию.'}}},
+{id:'oldGuitar',ages:[9,30],w:L=>L.skills.music?0:0.5,fire:L=>{addHobby(L,'music');L.adj({mood:4});return {k:'info',t:'На антресолях нашлась старая гитара. Вы начали учиться по видео и самоучителю.'}}},
+{id:'fishingDad',ages:[5,14],w:L=>L.dad&&!L.skills.fish?0.6:0,fire:L=>{addHobby(L,'fish');L.adj({rel:4});return {k:'info',t:'Папа взял вас на рыбалку на рассвете. Вы ничего не поймали, но влюбились в это.'}}},
+{id:'knitGranny',ages:[6,15],w:L=>L.skills.craft?0:0.5,fire:L=>{addHobby(L,'craft');L.adj({rel:3});return {k:'info',t:'Бабушка научила вас вязать. Первый шарф получился в полтора метра.'}}},
+{id:'phoneCamera',ages:[11,40],w:L=>L.flags.phone&&!L.skills.photo?0.5:0,fire:L=>{addHobby(L,'photo');return {k:'info',t:'Вы начали фотографировать всё вокруг: закаты, кошек, людей.'}}},
+{id:'cookBook',ages:[12,60],w:L=>L.skills.cook?0:0.4,fire:L=>{addHobby(L,'cook');return {k:'info',t:'Вы попробовали приготовить блюдо по рецепту из интернета. Получилось съедобно — это успех.'}}},
+{id:'library',ages:[7,70],w:L=>L.skills.read?0:0.5,fire:L=>{addHobby(L,'read');L.adj({know:2});return {k:'info',t:'Вы записались в библиотеку и уносите домой по три книги в неделю.'}}},
+{id:'codeClub',ages:[10,35],w:L=>L.home2&&L.home2.net&&!L.skills.code?0.4:0,fire:L=>{addHobby(L,'code');L.adj({know:2});return {k:'info',t:'Вы посмотрели урок по программированию и не смогли остановиться.'}}},
+{id:'danceParty',ages:[8,40],w:L=>L.skills.dance?0:0.4,fire:L=>{addHobby(L,'dance');return {k:'info',t:'На празднике вы танцевали так, что вас позвали в танцевальный кружок.'}}},
+{id:'gardenStart',ages:[25,80],w:L=>L.skills.garden?0:0.4,fire:L=>{addHobby(L,'garden');return {k:'info',t:'Вы посадили первые грядки. Каждое утро бегаете смотреть, что взошло.'}}},
+{id:'repairStart',ages:[10,60],w:L=>L.skills.tech?0:0.4,fire:L=>{addHobby(L,'tech');return {k:'info',t:'Вы разобрали сломанный приёмник, чтобы понять, как он устроен. Собрали обратно — почти.'}}},
+{id:'powerCut',ages:[3,95],w:(L,x,c)=>L.home2&&L.home2.elec&&c.gdp<20000?0.6:0,fire:L=>{L.adj({rel:1});return {k:'info',t:'Три дня не было света. Вечерами всей семьёй сидели при свечах и рассказывали истории.'}}},
+{id:'streetFlood',ages:[3,95],w:(L,x,c)=>['SA','EA','SSA','LA'].includes(c.region)?0.4:0.1,fire:L=>{L.adj({mood:-3,shock:-0.03});return {k:'info',t:'После ливня улицу затопило по колено. Неделю ходили в резиновых сапогах.'}}},
+{id:'cityFest',ages:[4,90],w:()=>0.5,fire:L=>{L.adj({mood:5});return {k:'info',t:L.rural?'В деревне был праздник урожая: музыка, ярмарка и скачки.':'В городе был большой праздник: концерт, салют и толпы людей.'}}},
+{id:'cousinWedding',ages:[5,80],w:()=>0.5,fire:L=>{L.adj({rel:3,mood:3,shock:-0.02});return {k:'info',t:'Гуляли на свадьбе двоюродного брата. Три дня, двести гостей и все родственники.'}}},
+{id:'newRoad',ages:[5,95],w:L=>L.rural?0.5:0.1,fire:L=>{L.adj({mood:2});return {k:'info',t:'В деревню наконец проложили асфальт. До города теперь час, а не три.'}}},
+{id:'strayDog',ages:[6,70],w:()=>0.4,fire:L=>{L.adj({mood:3});return {k:'info',t:'Во дворе прибилась бездомная собака. Вы её кормите, и она провожает вас каждое утро.'}}},
+{id:'lostKeys',ages:[14,90],w:()=>0.4,fire:L=>({k:'info',t:'Вы потеряли ключи и полдня сидели у соседей, пока не приехал мастер.'})},
+{id:'petOld',ages:[10,90],w:L=>L.flags.pet&&!L.flags.petGone?0.3:0,fire:L=>{L.flags.petGone=true;L.adj({mood:-7});return {k:'sad',t:'Не стало вашего питомца. Он прожил с вами долгую жизнь.'}}},
+{id:'phoneBroke',ages:[10,80],w:L=>L.flags.phone?0.4:0,fire:L=>{L.adj({mood:-3,shock:-0.03});return {k:'info',t:'Телефон упал экраном вниз. Месяц ходили с трещиной.'}}},
+{id:'breadPrice',ages:[16,95],w:(L,x,c)=>c.gdp<20000?0.4:0.15,fire:L=>{L.adj({mood:-2,shock:-0.02});return {k:'info',t:'Хлеб и масло снова подорожали. Приходится считать каждую монету.'}}},
+{id:'watchMatch',ages:[8,85],w:()=>0.4,fire:L=>{L.adj({mood:3,rel:2});return {k:'info',t:'Всем двором смотрели важный футбольный матч. Кричали так, что соседи жаловались.'}}},
+{id:'mainHoliday',ages:[2,95],w:()=>0.5,fire:L=>{L.adj({mood:4,rel:2});return {k:'info',t:'Главный праздник года: весь день готовили, а вечером собрались за огромным столом.'}}},
+{id:'friendBaby',ages:[22,45],w:()=>0.4,fire:L=>{L.adj({mood:2});return {k:'info',t:`У ${L.flags.bf?L.flags.bf:'лучшего друга'} родился ребёнок. Вас позвали в крёстные.`}}},
+{id:'schoolRenov',ages:[7,16],w:L=>L.inSchool?0.3:0,fire:L=>({k:'info',t:'Школу отремонтировали: новые парты и тёплые туалеты. Все ходили и трогали стены.'})},
+{id:'snowDay',ages:[6,16],w:(L,x,c)=>L.inSchool&&['EE','CA','HI'].includes(c.region)?0.4:0,fire:L=>{L.adj({mood:5});return {k:'info',t:'Из-за мороза отменили уроки. Весь день — горка и снежки.'}}},
+{id:'heatWave',ages:[3,95],w:(L,x,c)=>['ME','SA','SSA'].includes(c.region)?0.4:0.1,fire:L=>{L.adj({mood:-2,hp:-0.003});return {k:'info',t:'Страшная жара: днём на улицу не выйти, спали на крыше.'}}},
+{id:'oldLetters',ages:[30,95],w:()=>0.3,fire:L=>{L.adj({mood:2});return {k:'info',t:'Нашли старые письма родителей друг другу. Читали весь вечер.'}}},
+{id:'helpedStranger',ages:[12,90],w:()=>0.3,fire:L=>{L.adj({mood:4});return {k:'info',t:'Вы помогли заблудившемуся туристу найти дорогу. Он долго благодарил на своём языке.'}}},
+{id:'nightSky',ages:[6,95],w:L=>L.rural?0.4:0.1,fire:L=>{L.adj({mood:3});return {k:'info',t:'Летней ночью лежали на траве и считали падающие звёзды.'}}}
+);
+
 /* ===== Life ===== */
 class Life{
   constructor(o={}){
@@ -676,6 +779,7 @@ class Life{
     this.world=o.world||makeWorld(this.born,Math.floor(Math.random()*4294967296));
     /* быт семьи и защита от повторов; aiCover / aiChoiceAges — годы, для которых события и выборы пишет ИИ */
     this.home2=makeHome(this,c);this.home2.r0=this.rural;this.home2.c0=c.code;this.seen={};this.aiCover=new Set();this.aiChoiceAges=new Set();
+    this.skills={};this.hobbies=[];this.skillLv={};
     this.sibs=poisson(Math.max(0,c.fert-1)*0.7);
     this.lines=[];
   }
@@ -694,7 +798,7 @@ class Life{
   zEff(){return (this.zp===null?this.zf:this.zp-this.cal.zb)+this.shock}
   incomeAt(z,c){c=c||this.c;const mean=c.gdp*0.55*(calOf(c).ki||1);return mean*Math.exp(this.sigma*z-this.sigma*this.sigma/2)/12}
   income(){let v=this.incomeAt(this.zEff());if(this.retired)v*=0.6*this.pensionBoost*(this.housing==='own'?1.1:1);return v}
-  pctl(){return Math.round(ncdf(this.zEff())*100)}
+  pctl(){return clamp(Math.round(ncdf(this.zEff())*100),1,99)}
   mult(x){
     let w=Math.exp(-0.28*this.zEff())/Math.exp(0.0392);if(x<5)w=Math.pow(w,0.7);
     let m=w;const s=this.c.smoke/100;
@@ -827,6 +931,8 @@ class Life{
     if(this.sex==='f'&&c.cm>20&&['sport','military','transport','science'].includes(d.sphere))p*=0.8;
     p*=1+0.12*Math.min(this.dreamWins,3);
     p*=clamp(Math.exp(0.008*(this.know-45)),0.75,1.3);
+    // свой навык в той же сфере помогает мечте
+    let sk=0;for(const k of SKILL_KEYS)if(SKILLS[k].sphere===d.sphere)sk=Math.max(sk,this.skills[k]||0);p*=1+sk/250;
     if(k==='money')p*=z>0?1.05:0.65;
     return clamp(p*KIND[k][0],0.03,0.95)}
   buildFork(stage,spec){
@@ -926,6 +1032,15 @@ class Life{
     for(const E of EV_AGE[Math.min(x,MAXAGE)]){if(E.when(this,x,c)&&Math.random()<E.p(this,x,c)){const e=E.fire(this,x,c);if(e){e.id=E.id;ev.push(e)}}}
     // знания растут от учёбы и работы
     this.adj({know:(x>=3&&x<6&&this.zf>-0.5?1.5:0)+(this.inSchool?3.5+(this.focus==='study'?1.5:0):0)+(this.uni?5:0)+(this.college?4:0)+(this.working?0.4+(this.degree?0.4:0):0)-(x>70?0.3:0)});
+    // навыки: растут от увлечений и работы, без практики забываются
+    for(const k of this.hobbies){const s=SKILLS[k],b=this.skills[k]||0;
+      this.skills[k]=Math.min(100,b+(x<18?5:x<60?3:2)*(1-b/105)*(0.6+Math.random()*0.8)*(s.active&&this.focus==='health'?1.3:1));this.adj({mood:1.5})}
+    if(this.working&&this.job)for(const [re,k] of JOB_SKILL)if(re.test(this.job)){const b=this.skills[k]||0;this.skills[k]=Math.min(100,b+2.5*(1-b/110));if(b>=60&&this.zp!==null)this.zp+=0.003}
+    if(x>=4)this.skills.social=clamp((this.skills.social||0)+(x<20?1:0.3)+(this.rel-55)*0.04,0,100);
+    if(x>30)for(const k in this.skills)if(k!=='social'&&!this.hobbies.includes(k))this.skills[k]=Math.max(0,this.skills[k]-0.8);
+    if(this.flags.sideJob&&(this.skills[this.flags.sideJob]||0)>=60)this.shock+=0.03;
+    for(const k in this.skills){const lv=[30,60,85].filter(t=>this.skills[k]>=t).length,was=this.skillLv[k]||0;
+      if(lv>was){this.skillLv[k]=lv;ev.push({k:'mile',t:SKILLS[k].lv[lv-1],id:'skill'});if(lv===3)this.mark('win',`${SKILLS[k].name}: мастерство`)}}
     // одно обычное событие года (у детей чаще)
     if(!this.aiCover.has(x)&&Math.random()<(x<18?0.85:x<65?0.7:0.65)){if(!DAY_AGE)DAY_AGE=byAge(DAILY);
       const D=pickWeighted(DAY_AGE[Math.min(x,MAXAGE)],this,x,c);
@@ -1004,6 +1119,6 @@ function simulateFull(mode,soft,world){const L=new Life({auto:true,mode,soft,wor
   while(L.alive&&g++<130){const ds=L.beginYear();for(const d of ds)L.resolve(d,L.autoChoice(d));L.endYear();snaps.push(L.snapshot())}
   return {L,snaps}}
 
-return {TAG_FX,homeText,DAILY,CHOICES,makeWorld,setWorld,cohortSurvival,worldBirths,worldIncomePctl,incomeIn,COUNTRIES,BY,NAMES,DECISIONS,EVENTS,DRAFT,SPHERES,KIND,classifyDreamLocal,forkTemplate,Life,simulateFull,getTable,e0,survTo,avgLE,avgIncome,ruralShare,pickCountry,setData,setCal:v=>{CAL=v},getCal:()=>CAL,
+return {SKILLS,TAG_FX,homeText,DAILY,CHOICES,makeWorld,setWorld,cohortSurvival,worldBirths,worldIncomePctl,incomeIn,COUNTRIES,BY,NAMES,DECISIONS,EVENTS,DRAFT,SPHERES,KIND,classifyDreamLocal,forkTemplate,Life,simulateFull,getTable,e0,survTo,avgLE,avgIncome,ruralShare,pickCountry,setData,setCal:v=>{CAL=v},getCal:()=>CAL,
   clamp,gauss,ndtri,ncdf,plural,yrs,money,pick,wpick,MAXAGE};
 });

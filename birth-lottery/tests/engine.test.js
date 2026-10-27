@@ -253,6 +253,18 @@ test('быт: условия в доме по статистике, интерн
   assert.ok(!L2.endYear().some(e => e.daily), 'год, покрытый ИИ, без шаблонного события');
 });
 
+test('навыки растут от увлечений, без практики забываются', () => {
+  const L = new E.Life({ auto: true, country: E.BY.KZ });
+  L.init();
+  L.hobbies.push('music'); L.skills.music = 0; L.skills.chess = 50;
+  for (let i = 0; i < 40 && L.alive; i++) { L.endYear(); }
+  if (L.alive) {
+    assert.ok(L.skills.music > 30, 'музыка выросла: ' + L.skills.music);
+    assert.ok(L.skills.chess <= 50, 'шахматы без практики не растут');
+  }
+  for (const k of Object.keys(E.SKILLS)) assert.strictEqual(E.SKILLS[k].lv.length, 3, 'три уровня у навыка ' + k);
+});
+
 test('мир один для всех, кто родился в одну секунду', () => {
   const w = E.makeWorld(2026, 777);
   const lives = [0, 1, 2].map(() => { const r = E.simulateFull('births', false, w); return r.L; });

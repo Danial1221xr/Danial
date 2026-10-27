@@ -46,7 +46,7 @@ function familyOf(L){const a=L.age,p=[];
   if(L.sibs)p.push(`старших братьев и сестёр: ${L.sibs}`);if(L.young)p.push(`младших: ${L.young}`);
   if(L.married)p.push(`в браке с ${L.spouse}`);else if(L.everMarried)p.push(L.widowed?'вдов'+(L.sex==='m'?'ец':'а'):'в разводе');
   const k=L.kids.filter(k=>k.alive).map(k=>`${k.name} (${a-k.born})`);if(k.length)p.push('дети: '+k.join(', '));
-  if(L.grandkids)p.push(`внуков: ${L.grandkids}`);if(L.flags.pet)p.push('есть питомец');if(L.flags.bf)p.push(`лучший друг: ${L.flags.bf}`);
+  if(L.grandkids)p.push(`внуков: ${L.grandkids}`);if(L.flags.pet)p.push('есть питомец');if(L.hobbies&&L.hobbies.length)p.push('увлечения: '+L.hobbies.map(k=>LR.engine.SKILLS[k].hobby).join(', '));if(L.flags.bf)p.push(`лучший друг: ${L.flags.bf}`);
   return p.join('; ')}
 function homeOf(L){const h=L.home2;if(!h)return '';
   return [h.elec?'есть электричество':'нет электричества',h.water?'есть чистая вода':'воду носят издалека',h.toilet?'есть туалет':'туалета нет',h.cook?'готовят на газе или электричестве':'готовят на дровах',h.net?'есть интернет':'интернета нет'].join(', ')}

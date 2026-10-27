@@ -166,7 +166,7 @@ function renderThread(){const L=G.L;const ticks=[...document.querySelectorAll('#
   const le=L.sex==='m'?L.home.leM:L.home.leF;const mk=document.querySelector('.le-mark');mk.style.left=`calc(${le}% - 1px)`;mk.title=`Средняя продолжительность жизни ${L.sex==='m'?'мужчин':'женщин'} ${L.home.inName}: ${le}`;
   renderMarks(L)}
 /* иконки ключевых событий над нитью; близкие по возрасту расходятся по двум рядам */
-const MARK_ICON={school:'i-book',grad:'i-cap',work:'i-case',ring:'i-ring',baby:'i-baby',move:'i-plane',ill:'i-plus',rest:'i-sun',end:'i-end',dream:'i-star',army:'i-shield',biz:'i-shop'};
+const MARK_ICON={school:'i-book',grad:'i-cap',work:'i-case',ring:'i-ring',baby:'i-baby',move:'i-plane',ill:'i-plus',rest:'i-sun',end:'i-end',dream:'i-star',army:'i-shield',biz:'i-shop',win:'i-star'};
 function renderMarks(L){const box=$('#marks');if(box.dataset.n===String(L.marks.length))return;box.dataset.n=L.marks.length;
   const gap=2400/Math.max(240,box.clientWidth||600);// ≈24 px в процентах ширины нити
   const rows=[[],[]],chips=[];
@@ -190,13 +190,18 @@ function renderAll(){const L=G.L;if(!L)return;
   if(L.dream)rows.push(['Мечта',L.dream.title+(L.dreamGaveUp?' (отпущена)':'')]);
   if(!L.alive)rows[1]=['Итог',cap(L.status())+', '+L.cause];
   $('#nowDl').innerHTML=rows.map(r=>`<dt>${r[0]}</dt><dd>${r[0]==='Доход'||r[0]==='Доход семьи'?r[1]:esc(r[1])}</dd>`).join('');
-  renderStats(L);renderGen(L);
+  renderStats(L);renderGen(L);renderSkills(L);
   renderThread();renderNbs();renderFacts();renderStage(L);updFocusHint()}
 /* показатели 0–100, как в паспорте жизни */
 const STAT_LBL=[['health','Здоровье'],['know','Знания'],['happy','Счастье'],['rel','Отношения'],['wealth','Достаток']];
 function renderStats(L){const st=L.stats();
   $('#stats').innerHTML=STAT_LBL.map(([k,l])=>{const v=st[k];return `<div class="stat st-${k}" title="${l}: ${v} из 100"><span class="sl">${l}</span><span class="bar" role="meter" aria-label="${l}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${v}"><i style="width:${v}%"></i></span><span class="sv mono">${v}</span></div>`}).join('')
     +`<p class="stat-note">Достаток — место среди людей вашей страны. Среди всех людей мира вы богаче ${st.world}%.</p>`}
+/* навыки и увлечения */
+function renderSkills(L){const S=E.SKILLS,top=Object.entries(L.skills).filter(([,v])=>v>=1).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const lvl=v=>v>=85?'мастер':v>=60?'умеет хорошо':v>=30?'уверенно':'новичок';
+  $('#skills').innerHTML=(L.hobbies.length?`<div class="chips">${L.hobbies.map(k=>`<span class="chip static">${esc(S[k].hobby)}</span>`).join('')}</div>`:`<p class="muted" style="margin:0;font-size:13px">${L.age<5?'Пока вы только познаёте мир.':'Увлечений пока нет.'}</p>`)
+    +(top.length?`<div class="stats" style="margin:10px 0 0">${top.map(([k,v])=>`<div class="stat st-skill" title="${esc(S[k].name)}: ${Math.round(v)} из 100 — ${lvl(v)}"><span class="sl">${esc(S[k].name)}</span><span class="bar"><i style="width:${v.toFixed(0)}%"></i></span><span class="sv mono">${Math.round(v)}</span></div>`).join('')}</div>`:'')}
 /* поколение: все дети мира, родившиеся в один год с вами */
 function renderGen(L){const born=E.worldBirths()/1000,a=L.age,alive=E.cohortSurvival(a+(L.alive?0:1));
   const f=v=>v>=10?Math.round(v):v.toFixed(1).replace('.',',');
@@ -233,7 +238,9 @@ function statsEnd(L){const lg=L.incomeLog.filter(x=>x.age>=1);if(!lg.length)retu
     <div><b>${avg('hap')}</b><span>счастье в среднем за жизнь</span></div>
     <div><b>${Math.max(...lg.map(x=>x.kn))}</b><span>знания на пике</span></div>
     <div><b>${avg('hl')}</b><span>здоровье в среднем</span></div>
-    <div><b>${best.age}</b><span>самый счастливый возраст</span></div></div></div>`}
+    <div><b>${best.age}</b><span>самый счастливый возраст</span></div></div>${skillsEnd(L)}</div>`}
+function skillsEnd(L){const top=Object.entries(L.skills).filter(([,v])=>v>=30).sort((a,b)=>b[1]-a[1]).slice(0,3);if(!top.length)return '';
+  return `<p style="margin:12px 0 0;font-size:14px">Чему вы научились: ${top.map(([k,v])=>`${esc(E.SKILLS[k].name.toLowerCase())} (${Math.round(v)})`).join(', ')}.${L.hobbies.length?` Увлечения до конца жизни: ${L.hobbies.map(k=>esc(E.SKILLS[k].hobby)).join(', ')}.`:''}</p>`}
 /* «параллельные жизни»: то же место в обществе — в других странах */
 function parallelHtml(L){const z=L.zMean(),p=Math.round(E.ncdf(z)*100),le=c=>L.sex==='m'?c.leM:c.leF;
   const pool=['NO','US','CN','IN','NG','BR','DE','RU','KZ','NE'].filter(k=>BY[k]&&k!==L.home.code);
