@@ -127,6 +127,26 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .stage-sub{font-size:13px;color:var(--ink);opacity:.8;margin-top:4px}
 .feed li{animation:feedIn .35s ease-out}
 @keyframes feedIn{from{opacity:0;transform:translateY(-4px)}}
+/* показатели */
+.stats{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}
+.stat{display:grid;grid-template-columns:84px 1fr 28px;align-items:center;gap:8px;font-size:13px}
+.stat .sl{color:var(--muted)}
+.stat .bar{height:8px;border-radius:4px;background:var(--t-empty);overflow:hidden}
+.stat .bar i{display:block;height:100%;border-radius:4px;background:var(--ph-school);transition:width .6s ease}
+.st-health .bar i{background:var(--ph-child)}.st-happy .bar i{background:var(--ph-work)}.st-rel .bar i{background:var(--ph-old)}.st-wealth .bar i{background:var(--accent)}
+.stat .sv{text-align:right;font-size:12px}
+.stat-note{margin:2px 0 0;font-size:12px;color:var(--muted)}
+.gen p{margin:0;font-size:14px}
+.genbar{height:10px;border-radius:5px;background:var(--sad-soft);overflow:hidden;margin-top:8px}
+.genbar i{display:block;height:100%;background:var(--ph-child);transition:width .6s ease}
+.feed .tag{display:inline-block;font:500 11px/1 var(--f-mono);letter-spacing:.04em;text-transform:uppercase;color:var(--bg);background:var(--muted);border-radius:6px;padding:3px 6px;margin-right:6px;vertical-align:1px}
+.feed li.world .t{color:var(--muted)}
+.card .sum{grid-template-columns:repeat(2,minmax(0,1fr))}
+.parallel table{width:100%;border-collapse:collapse;font-size:14px}
+.parallel th{font-weight:500;font-size:12px;color:var(--muted);text-align:left;padding:4px 4px 6px 0}
+.parallel td{padding:6px 4px 6px 0;border-top:1px solid var(--line)}
+.parallel th:not(:first-child),.parallel td:not(:first-child){text-align:right}
+.parallel tr.you td{font-weight:600}
 /* графики экрана конца */
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--muted);margin-bottom:6px}
 .key{display:inline-block;width:16px;height:0;border-top:2px solid var(--accent);vertical-align:middle;margin-right:6px}

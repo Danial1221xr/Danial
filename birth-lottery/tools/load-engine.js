@@ -7,6 +7,7 @@ function loadEngine({ cal } = {}) {
   const dir = path.join(__dirname, '..', 'data');
   const read = f => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
   E.setData(read('countries.json').countries, read('names.json'), cal || read('cal.json'));
+  if (fs.existsSync(path.join(dir, 'world-timeline.json'))) E.setWorld(read('world-timeline.json'));
   return E;
 }
 

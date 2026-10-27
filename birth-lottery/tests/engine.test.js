@@ -104,14 +104,15 @@ test('страна выпадает по доле рождений', () => {
 test('этап 2: не меньше 25 новых решений и 20 событий, и все они встречаются', () => {
   assert.ok(E.DECISIONS.length >= 25, 'решений: ' + E.DECISIONS.length);
   assert.ok(E.EVENTS.length >= 20, 'событий: ' + E.EVENTS.length);
+  const dIds = new Set(E.DECISIONS.map(d => d.id)), eIds = new Set(E.EVENTS.map(e => e.id));
   const seenD = new Set(), seenE = new Set();
-  for (let i = 0; i < 6000 && (seenD.size < E.DECISIONS.length || seenE.size < E.EVENTS.length); i++) {
+  for (let i = 0; i < 6000 && (seenD.size < dIds.size || seenE.size < eIds.size); i++) {
     const L = new E.Life({ auto: true });
     L.init();
     let g = 0;
     while (L.alive && g++ < 130) {
-      for (const d of L.beginYear()) { seenD.add(d.id); L.resolve(d, L.autoChoice(d)); }
-      for (const e of L.endYear()) if (e.id) seenE.add(e.id);
+      for (const d of L.beginYear()) { if (dIds.has(d.id)) seenD.add(d.id); L.resolve(d, L.autoChoice(d)); }
+      for (const e of L.endYear()) if (eIds.has(e.id)) seenE.add(e.id);
     }
   }
   const missD = E.DECISIONS.map(d => d.id).filter(id => !seenD.has(id));
@@ -206,6 +207,47 @@ test('мечта зависит от места рождения: «врач» �
   };
   const no = rate('NO'), ne = rate('NE');
   assert.ok(no > ne * 3, `Норвегия ${no}, Нигер ${ne}`);
+});
+
+test('повседневная жизнь: все бытовые события и выборы встречаются, показатели в пределах 0–100', () => {
+  assert.ok(E.DAILY.length >= 50 && E.CHOICES.length >= 20, `событий ${E.DAILY.length}, выборов ${E.CHOICES.length}`);
+  const seenD = new Set(), seenC = new Set();
+  let daily = 0, choices = 0, years = 0;
+  for (let i = 0; i < 4000; i++) {
+    const L = new E.Life({ auto: true });
+    L.init();
+    let g = 0;
+    while (L.alive && g++ < 130) {
+      for (const d of L.beginYear()) {
+        if (d.everyday) { seenC.add(d.id); choices++; for (const o of d.opts) assert.ok(o.hint !== undefined && o.w > 0); }
+        L.resolve(d, L.autoChoice(d));
+      }
+      for (const e of L.endYear()) if (e.daily) { seenD.add(e.id); daily++; }
+      years++;
+      if (L.alive && g % 7 === 0) for (const [k, v] of Object.entries(L.stats())) assert.ok(v >= 0 && v <= 100, `${k} = ${v}`);
+    }
+  }
+  assert.deepStrictEqual(E.DAILY.map(d => d.id).filter(id => !seenD.has(id)), [], 'бытовые события, которых не было');
+  assert.deepStrictEqual(E.CHOICES.map(d => d.id).filter(id => !seenC.has(id)), [], 'бытовые выборы, которых не было');
+  assert.ok(daily / years > 0.5 && daily / years < 1.01, 'примерно одно обычное событие в год: ' + daily / years);
+  assert.ok(choices / years > 0.15 && choices / years < 0.4, 'бытовой выбор раз в 3–6 лет: ' + choices / years);
+});
+
+test('мир один для всех, кто родился в одну секунду', () => {
+  const w = E.makeWorld(2026, 777);
+  const lives = [0, 1, 2].map(() => { const r = E.simulateFull('births', false, w); return r.L; });
+  assert.ok(lives.every(L => L.world === w));
+  const a = E.makeWorld(2026, 777), b = E.makeWorld(2026, 777);
+  for (let y = 2026; y < 2100; y++) assert.deepStrictEqual(a.at(y).map(e => e.t), b.at(y).map(e => e.t));
+  const all = []; for (let y = 2026; y < 2101; y++) all.push(...w.at(y).map(e => e.t));
+  assert.ok(all.some(t => /Население Земли/.test(t)), 'есть рубежи населения из прогноза ООН');
+});
+
+test('мировая статистика: поколение и доход в мире', () => {
+  assert.ok(E.cohortSurvival(0) > 0.999 && E.cohortSurvival(5) < 0.99 && E.cohortSurvival(80) < 0.5);
+  assert.ok(E.worldIncomePctl(50) < E.worldIncomePctl(500) && E.worldIncomePctl(5000) > 90);
+  const z = 0.5;
+  assert.ok(E.incomeIn(E.BY.NO, z) > E.incomeIn(E.BY.NE, z) * 10, 'то же место в обществе в Норвегии и Нигере');
 });
 
 test('соседи по секунде: снимки на каждый год', () => {

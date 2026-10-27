@@ -115,7 +115,7 @@ const DECISIONS=[
   return {id:'keepWorking',title:'Пенсионный возраст',text:poor?'Пенсия в вашей стране маленькая или её нет совсем. Можно работать дальше, пока хватает сил.':'Можно выйти на пенсию или ещё поработать.',
     opts:[opt('Работать дальше','Доход сохранится, но силы уже не те',poor?0.6:0.3,()=>{L.retExtra+=5;return 'Вы решили ещё поработать.'}),
           opt('На пенсию','Больше времени для себя и семьи',poor?0.4:0.7,()=>'Вы готовитесь к пенсии.')]}}},
-{id:'marriageCrisis',ages:[13,100],stage:'взрослость',when:(L,x,c)=>L.married&&Math.random()<({HI:0.02,EE:0.02,LA:0.012,CA:0.01}[c.region]||0.006)*(1+0.4*L.stress),
+{id:'marriageCrisis',ages:[13,100],stage:'взрослость',when:(L,x,c)=>L.married&&Math.random()<({HI:0.02,EE:0.02,LA:0.012,CA:0.01}[c.region]||0.006)*(1+0.4*L.stress)*clamp(1.6-L.rel/100,0.6,1.6),
  make:(L,x,c)=>{const ps=clamp(0.55+(L.focus==='family'?0.15:0)-0.05*L.stress,0.2,0.85);
   return {id:'marriageCrisis',title:'Кризис в браке',text:`Вы с ${L.spouse} всё чаще ссоритесь. Кажется, вместе вам тяжело.`,
     opts:[opt('Развестись','Начать отдельно',0.45,()=>L.divorce()),
@@ -237,7 +237,12 @@ const DECISIONS=[
 
 /* Индекс по возрасту: каждый год проверяются только решения и события, подходящие по возрасту. */
 function byAge(list){const idx=[];for(let x=0;x<=MAXAGE;x++)idx.push(list.filter(d=>x>=d.ages[0]&&x<=d.ages[1]));return idx}
-let DEC_AGE=null,EV_AGE=null;
+let DEC_AGE=null,EV_AGE=null,CH_AGE=null,DAY_AGE=null;
+/* взвешенный выбор из списка по весам w(L,x,c) без лишних массивов: симуляция крутит его миллионы раз */
+const WBUF=new Float64Array(128);
+function pickWeighted(list,L,x,c){let tot=0;for(let i=0;i<list.length;i++){const w=list[i].w(L,x,c);WBUF[i]=w>0?w:0;tot+=WBUF[i]}
+  if(tot<=0)return null;let r=Math.random()*tot;for(let i=0;i<list.length;i++){r-=WBUF[i];if(r<=0&&WBUF[i]>0)return list[i]}
+  for(let i=list.length-1;i>=0;i--)if(WBUF[i]>0)return list[i];return null}
 
 /* События года. p — вероятность (с учётом страны и прошлого), fire — эффект и текст. */
 const EVENTS=[
@@ -270,7 +275,7 @@ const EVENTS=[
 {id:'siblingDeath',ages:[1,112],when:(L,x)=>L.sibs>0&&x>=1,p:(L,x)=>{const q=(L.qd||(L.qd=getTable(L.home,'m')))[Math.min(x+3,MAXAGE)];return clamp(q*L.sibs*0.8,0,0.5)},
  fire:L=>{L.sibs--;L.stress+=1;return {k:'sad',t:Math.random()<0.5?'Умер ваш брат.':'Умерла ваша сестра.'}}},
 {id:'robbery',ages:[14,112],when:(L,x)=>x>=14,p:(L,x,c)=>clamp(c.hom/1e5*40,0.001,0.02),fire:L=>{L.shock-=0.12;L.stress+=0.5;return {k:'sad',t:'Вас обокрали: пропали деньги и вещи.'}}},
-{id:'promotion',ages:[24,58],when:(L,x)=>L.working&&!L.biz&&x>=24&&x<=58,p:L=>0.04*({study:1.5,money:1.3}[L.focus]||1)*(L.degree?1.3:1),fire:L=>{L.zp+=0.15;return {k:'mile',t:'Вас повысили на работе.'}}},
+{id:'promotion',ages:[24,58],when:(L,x)=>L.working&&!L.biz&&x>=24&&x<=58,p:L=>0.04*({study:1.5,money:1.3}[L.focus]||1)*(L.degree?1.3:1)*clamp(1+0.01*(L.know-45),0.6,1.6),fire:L=>{L.zp+=0.15;return {k:'mile',t:'Вас повысили на работе.'}}},
 {id:'bizYear',ages:[20,112],when:L=>!!L.biz,p:()=>1,fire:L=>{const b=L.biz;b.y++;
   if(b.y<=3&&Math.random()<(1-b.p)/3){L.biz=null;L.shock-=0.7;L.debt=Math.max(L.debt,3);L.stress+=1;return {k:'sad',t:'Ваше дело пришлось закрыть: денег не хватило. Остались долги.'}}
   if(b.y===3){L.zp+=0.35;return {k:'mile',t:'Ваше дело встало на ноги и приносит доход.'}}
@@ -361,6 +366,203 @@ const DREAM_END={
   early:['Мечта не успела сбыться.','Жизнь оказалась короче, чем путь к мечте.']
 };
 
+/* ===== повседневная жизнь, показатели и мир =====
+   Показатели 0–100: здоровье, знания, счастье, отношения (достаток — процентиль дохода).
+   Они меняются от обычных событий и бытовых выборов и сами влияют на жизнь:
+   здоровье — на риск смерти (hp), знания — на учёбу и доход, отношения — на брак и семью, счастье — на стресс.
+   Мир (World) общий для всех, кто родился в одну секунду: новости по прогнозу ООН, большой спорт, кризисы и эпидемии. */
+
+const up=s=>s+' ↑',down=s=>s+' ↓';
+/* поправки показателей одной строкой: L.adj({mood:5, rel:-3, know:2, hp:0.01, stress:0.5, shock:-0.1}) */
+function kidName(L,min,max){const k=L.kids.filter(k=>k.alive&&L.age-k.born>=min&&L.age-k.born<=max);return k.length?pick(k):null}
+const sonDaughter=k=>k.sex==='m'?'Сын':'Дочь';
+const heShe=(k,m,f)=>k.sex==='m'?m:f;
+
+/* Обычные события: каждый год выпадает не больше одного. w — относительный вес (0 — не подходит). */
+const DAILY=[
+/* --- малыши --- */
+{id:'firstWords',ages:[1,2],w:L=>L.flags.words?0:3,fire:L=>{L.flags.words=true;L.adj({know:2,mood:3});return {k:'info',t:`Вы сказали первое слово: «${pick(['мама','папа','дай','баба','нет'])}».`}}},
+{id:'firstSteps',ages:[1,1],w:L=>L.flags.steps?0:3,fire:L=>{L.flags.steps=true;return {k:'info',t:'Вы сделали первые шаги — прямо к маме.'}}},
+{id:'kindergarten',ages:[3,5],w:(L,x,c)=>L.flags.kg?0:clamp(c.gdp/15000+0.4*L.zf,0.1,2),fire:L=>{L.flags.kg=true;L.adj({know:3,rel:2,mood:-2});return {k:'info',t:'Вы пошли в детский сад. Первую неделю плакали каждое утро.'}}},
+{id:'grandma',ages:[3,12],w:()=>1,fire:L=>{L.adj({mood:5,rel:3});return {k:'info',t:L.rural?'Лето у бабушки: вы научились доить козу и кормить кур.':'Лето у бабушки в деревне: речка, малина и никаких уроков.'}}},
+{id:'pet',ages:[4,14],w:L=>L.flags.pet?0:0.6+0.3*ncdf(L.zf),fire:L=>{L.flags.pet=true;L.adj({mood:8});const d=Math.random()<0.5;return {k:'info',t:`Дома появился ${d?'щенок':'котёнок'}. Вы назвали ${d?'его':'его'} ${pick(d?['Бим','Рекс','Шарик','Джек']:['Мурзик','Барсик','Пушок','Симба'])}.`}}},
+{id:'parentsQuarrel',ages:[3,17],w:L=>L.mom&&L.dad?(L.zf<-0.5?1.6:0.9):0,fire:L=>{L.adj({mood:-8,rel:-4,stress:0.5});return {k:'sad',t:pick(['Мама и папа сильно поругались. Вы всё слышали из своей комнаты.','Родители поругались из-за денег и несколько дней не разговаривали.','Папа ушёл ночевать к другу после ссоры с мамой. Через пару дней вернулся.'])}}},
+{id:'childSick',ages:[1,10],w:(L,x,c)=>0.5+c.u5/40,fire:L=>{L.adj({hp:-0.005,mood:-3});return {k:'info',t:'Вы долго болели: неделя с высокой температурой. Мама не отходила от вас.'}}},
+{id:'scraped',ages:[5,14],w:()=>0.8,fire:L=>{L.adj({mood:-2});return {k:'info',t:L.rural?'Вы упали с дерева и разбили коленки. Шрам остался на всю жизнь.':'Вы упали с велосипеда и разбили коленки.'}}},
+{id:'brokeArm',ages:[5,16],w:()=>0.25,fire:L=>{L.adj({mood:-5,hp:-0.005});return {k:'info',t:'Вы сломали руку. Месяц в гипсе, и весь класс расписался на нём.'}}},
+{id:'newSibling',ages:[2,12],w:(L,x,c)=>L.mom&&L.momAge+x<42?clamp((c.fert-1)/2,0.05,1.5):0,fire:(L,x,c)=>{const s=Math.random()<0.512?'m':'f';L.young=(L.young||0)+1;L.adj({rel:3,mood:2});return {k:'mile',t:`Родился ${s==='m'?'младший брат':'младшая сестра'}: ${pickName(c,s)}.`}}},
+{id:'birthday',ages:[4,12],w:L=>0.4+0.6*ncdf(L.zf),fire:L=>{L.adj({mood:6});return {k:'info',t:`На день рождения пришли друзья. Лучший подарок — ${pick(['мяч','конструктор','книга с картинками','кукла','машинка на пульте','новые кроссовки'])}.`}}},
+{id:'lost',ages:[3,8],w:()=>0.3,fire:L=>{L.adj({mood:-3});return {k:'info',t:'Вы потерялись на рынке. Нашлись через час — и получили от мамы и объятия, и нагоняй.'}}},
+/* --- школа --- */
+{id:'scolded',ages:[7,16],w:L=>L.inSchool?clamp(1.4-L.know/60,0.2,1.4)*(L.focus==='study'?0.6:1):0,fire:L=>{L.adj({mood:-5,rel:-3,know:1});return {k:'info',t:pick(['Вы получили двойку по математике. Дома наругали и отобрали телефон на неделю.','Учительница вызвала родителей в школу. Дома был серьёзный разговор.','За плохие оценки в четверти вас наругали и не пустили гулять.'])}}},
+{id:'praised',ages:[7,17],w:L=>L.inSchool?clamp(L.know/50,0.2,1.6):0,fire:L=>{L.adj({mood:5,know:2});return {k:'info',t:'Учитель похвалил вас перед всем классом. Вы шли домой и улыбались.'}}},
+{id:'friendFight',ages:[7,15],w:()=>0.7,fire:L=>{L.adj({mood:-2,rel:1});return {k:'info',t:'Вы поссорились с лучшим другом, а через неделю помирились, как будто ничего не было.'}}},
+{id:'bestFriend',ages:[6,18],w:L=>L.flags.bf?0.1:1,fire:(L,x,c)=>{let n=pickName(c,L.sex);for(let i=0;i<5&&n===L.name;i++)n=pickName(c,L.sex);L.flags.bf=n;L.adj({rel:6,mood:4});return {k:'mile',t:`У вас появил${L.g('ся лучший друг','ась лучшая подруга')} — ${n}.`}}},
+{id:'teased',ages:[8,15],w:()=>0.5,fire:L=>{L.adj({mood:-7,stress:0.3});return {k:'info',t:'Над вами смеялись в классе из-за одежды. Было обидно, но вы справились.'}}},
+{id:'schoolTrip',ages:[8,16],w:L=>L.inSchool?0.3+0.6*ncdf(L.zf):0,fire:L=>{L.adj({mood:6,know:2});return {k:'info',t:`Поездка с классом: вы впервые увидели ${pick(['море','горы','большой музей','столицу','зоопарк'])}.`}}},
+{id:'firstPhone',ages:[8,15],w:(L,x,c)=>L.flags.phone?0:clamp(c.gdp/20000+0.4*L.zf,0.05,1.5),fire:L=>{L.flags.phone=true;L.adj({mood:5});return {k:'info',t:'Вам купили первый телефон. Теперь вы почти не выпускаете его из рук.'}}},
+{id:'chores',ages:[6,14],w:L=>L.rural||L.zf<-0.5?1:0.2,fire:L=>{L.adj({rel:2,mood:-1});return {k:'info',t:L.rural?'Каждое утро до школы — вода, скотина и огород.':'После школы вы сидите с младшими, пока родители на работе.'}}},
+{id:'sportWin',ages:[8,18],w:L=>L.active?1.2:0,fire:L=>{L.adj({mood:8,hp:0.005});return {k:'mile',t:'Ваша команда выиграла районные соревнования.'}}},
+{id:'goodBook',ages:[8,25],w:L=>clamp(L.know/50,0.2,1.5)*(L.focus==='study'?1.4:1),fire:L=>{L.adj({know:3,mood:2});return {k:'info',t:'Вы прочитали книгу, которая запомнилась на всю жизнь.'}}},
+/* --- юность --- */
+{id:'parentsTeen',ages:[13,18],w:L=>L.mom||L.dad?1:0,fire:L=>{L.adj({rel:-4,mood:-2});return {k:'info',t:pick(['Вы поругались с родителями из-за того, во сколько возвращаться домой.','Родители не понимают вашу музыку, одежду и друзей. Дома всё время споры.'])}}},
+{id:'unrequited',ages:[13,19],w:L=>L.married?0:0.8,fire:L=>{L.adj({mood:-6});return {k:'info',t:'Вы влюбились, но без взаимности. Пару месяцев мир казался серым.'}}},
+{id:'firstMoney',ages:[13,18],w:L=>L.working||L.flags.earlyWork?1:0,fire:L=>{L.adj({mood:4});return {k:'info',t:`Первые заработанные деньги вы потратили на ${pick(['подарок маме','кроссовки','телефон','сладости для младших'])}.`}}},
+{id:'concert',ages:[14,25],w:L=>L.rural?0.2:0.7,fire:L=>{L.adj({mood:6,rel:2});return {k:'info',t:'Вы впервые сходили на концерт любимой группы и сорвали голос.'}}},
+{id:'license',ages:[17,26],w:(L,x,c)=>L.flags.license?0:clamp(c.gdp/25000,0.05,1),fire:L=>{L.flags.license=true;L.adj({mood:3});return {k:'info',t:'Вы получили водительские права с первой попытки.'}}},
+/* --- взрослость --- */
+{id:'boss',ages:[18,64],w:L=>L.working&&!L.biz?0.8:0,fire:L=>{L.adj({mood:-5,stress:0.5});return {k:'info',t:'Поругались с начальником. Неделю ходили мрачнее тучи.'}}},
+{id:'workFriends',ages:[18,64],w:L=>L.working?0.7:0,fire:L=>{L.adj({rel:4,mood:3});return {k:'info',t:'На работе появились хорошие друзья. Теперь по пятницам вы собираетесь вместе.'}}},
+{id:'vacation',ages:[20,75],w:L=>L.zp!==null&&L.zEff()>0?0.9:0,fire:L=>{L.adj({mood:8,stress:-1,hp:0.005});return {k:'info',t:`Отпуск ${pick(['у моря','в горах','в другой стране','на даче у друзей'])}. Вы наконец выспались.`}}},
+{id:'noVacation',ages:[20,64],w:L=>L.zp!==null&&L.zEff()<-0.5?0.9:0,fire:L=>{L.adj({mood:-3,stress:0.3});return {k:'info',t:'Ещё один год без отпуска: денег хватает только на самое нужное.'}}},
+{id:'carBroke',ages:[22,70],w:(L,x,c)=>c.gdp>8000&&L.zp!==null&&L.zEff()>-0.3?0.5:0,fire:L=>{L.adj({shock:-0.08,mood:-3});return {k:'info',t:'Сломалась машина. Ремонт съел целую зарплату.'}}},
+{id:'spouseQuarrel',ages:[18,90],w:L=>L.married?0.8:0,fire:L=>{L.adj({rel:-2,mood:-3});return {k:'info',t:`Вы с ${L.spouse} поругались из-за ${pick(['денег','родственников','ремонта','ерунды'])}, но вечером помирились.`}}},
+{id:'anniversary',ages:[20,100],w:L=>L.married&&L.marriedAt!=null&&(L.age-L.marriedAt)>0&&(L.age-L.marriedAt)%10===0?3:0,fire:L=>{L.adj({mood:6,rel:4});const n=L.age-L.marriedAt;return {k:'mile',t:`${n} лет вместе с ${L.spouse}.`}}},
+{id:'kidSteps',ages:[16,70],w:L=>kidName(L,1,1)?1.5:0,fire:L=>{const k=kidName(L,1,1);L.adj({mood:6});return {k:'info',t:`${sonDaughter(k)} ${k.name} ${heShe(k,'сделал','сделала')} первые шаги.`}}},
+{id:'kidSchool',ages:[20,70],w:L=>kidName(L,7,7)?1.5:0,fire:L=>{const k=kidName(L,7,7);L.adj({mood:4});return {k:'info',t:`${sonDaughter(k)} ${k.name} ${heShe(k,'пошёл','пошла')} в первый класс.`}}},
+{id:'kidGrade',ages:[22,70],w:L=>kidName(L,8,16)?0.6:0,fire:L=>{const k=kidName(L,8,16);L.adj({mood:-2,rel:1});return {k:'info',t:`${k.name} ${heShe(k,'принёс','принесла')} двойку. Пришлось сесть вместе за уроки.`}}},
+{id:'kidSick',ages:[16,70],w:L=>kidName(L,0,9)?0.5:0,fire:L=>{const k=kidName(L,0,9);L.adj({mood:-5,stress:0.5});return {k:'info',t:`${k.name} долго ${heShe(k,'болел','болела')}. Вы почти не спали.`}}},
+{id:'kidGrad',ages:[30,80],w:L=>kidName(L,17,17)?1.5:0,fire:L=>{const k=kidName(L,17,17);L.adj({mood:6});return {k:'mile',t:`${sonDaughter(k)} ${k.name} ${heShe(k,'окончил','окончила')} школу.`}}},
+{id:'reunion',ages:[25,55],w:L=>L.age%10===5?1.5:0,fire:L=>{L.adj({mood:2});return {k:'info',t:'Встреча выпускников: кто-то разбогател, кто-то уехал, кто-то не пришёл.'}}},
+{id:'insomnia',ages:[20,80],w:L=>L.stress>=1.5?1.2:0,fire:L=>{L.adj({hp:-0.01,mood:-4});return {k:'info',t:'Полгода вы плохо спали из-за нервов.'}}},
+{id:'running',ages:[22,65],w:L=>L.active?0:L.focus==='health'?1.2:0.3,fire:L=>{L.active=true;L.adj({hp:0.01,mood:3});return {k:'info',t:'Вы начали бегать по утрам. Первую неделю болело всё.'}}},
+{id:'weight',ages:[30,65],w:(L,x,c)=>!L.active&&c.gdp>10000?0.5:0,fire:L=>{L.adj({hp:-0.015,mood:-2});return {k:'info',t:'Вы заметно набрали вес. Брюки стали тесными.'}}},
+{id:'neighbors',ages:[22,90],w:L=>L.rural?0.8:0.3,fire:L=>{L.adj({rel:3});return {k:'info',t:L.rural?'Соседи всей улицей помогли вам перекрыть крышу.':'Вы подружились с соседями и теперь оставляете им ключи.'}}},
+{id:'wedding',ages:[20,40],w:()=>0.5,fire:L=>{L.adj({mood:4,rel:2});return {k:'info',t:`Вы были на свадьбе ${L.flags.bf?`${L.g('лучшего друга','лучшей подруги')} — ${L.flags.bf}`:'двоюродного брата'}. Танцевали до утра.`}}},
+{id:'familyFeast',ages:[0,100],w:(L,x,c)=>['SA','ME','CA','SSA','EA'].includes(c.region)?0.7:0.35,fire:L=>{L.adj({rel:4,mood:4});return {k:'info',t:'Большой семейный праздник: собрались все родственники, даже те, кого вы не помнили.'}}},
+{id:'parentsAging',ages:[30,65],w:L=>(L.mom&&L.momAge+L.age>70)||(L.dad&&L.dadAge+L.age>70)?0.8:0,fire:L=>{L.adj({rel:2,mood:-3});return {k:'info',t:'Родители стали часто болеть. Вы стараетесь звонить им каждый день.'}}},
+{id:'newTech',ages:[45,85],w:()=>0.5,fire:L=>{L.adj({know:2});return {k:'info',t:'Вы освоили новую технику — дети терпеливо объясняли каждую кнопку.'}}},
+/* --- старость --- */
+{id:'garden',ages:[60,95],w:L=>L.rural?1.2:0.5,fire:L=>{L.adj({mood:5,hp:0.005});return {k:'info',t:'Вы целыми днями в огороде. Урожай раздаёте соседям.'}}},
+{id:'lonely',ages:[65,105],w:L=>!L.married&&!L.withKids?1:0,fire:L=>{L.adj({mood:-6});return {k:'info',t:'Зимой было одиноко: дети звонят редко, друзей становится меньше.'}}},
+{id:'grandVisit',ages:[50,100],w:L=>L.grandkids>0?1.3:0,fire:L=>{L.adj({mood:7,rel:3});return {k:'info',t:'Приезжали внуки. В доме было шумно и хорошо.'}}},
+{id:'jubilee',ages:[60,100],w:L=>L.age%10===0?4:0,fire:L=>{L.adj({mood:6,rel:2});return {k:'mile',t:`Юбилей — ${yrs(L.age)}. Собрались родные и старые друзья.`}}},
+{id:'oldFriend',ages:[70,105],w:()=>0.6,fire:L=>{L.adj({mood:-6});return {k:'sad',t:'Не стало старого друга. Вы долго перебирали ваши общие фотографии.'}}},
+{id:'photos',ages:[55,105],w:()=>0.5,fire:L=>{L.adj({mood:3});return {k:'info',t:'Вы разбирали старые фотографии и долго смеялись над своими причёсками.'}}}
+];
+
+/* Бытовые выборы: не больше одного за год. В подсказке — что изменится (и шанс, если он есть). */
+const CHOICES=[
+{id:'badGrade',ages:[8,16],w:L=>L.inSchool?1.2:0,make:L=>{const p=clamp(0.3+L.know/150,0.2,0.85);
+  return {id:'badGrade',stage:'детство',title:'Двойка в дневнике',text:'Вы получили двойку за контрольную. Вечером родители спросят про оценки.',
+    opts:[opt('Честно показать родителям',`${down('настроение')} · ${up('отношения')}`,0.5,()=>{L.adj({mood:-3,rel:3,know:2});return 'Наругали, но потом папа помог разобраться с задачами.'}),
+          opt('Спрятать дневник','Узнают примерно в 60% случаев',0.2,()=>{if(Math.random()<0.6){L.adj({rel:-8,mood:-6});return 'Обман раскрылся. Дома был скандал.'}L.adj({mood:1});return 'Пронесло. Но на душе неспокойно.'}),
+          opt('Попросить учителя пересдать',`${up('знания')} · получается примерно у ${pct(p)}`,0.3,()=>{L.adj({know:3});if(Math.random()<p){L.adj({mood:4});return 'Вы пересдали на четвёрку.'}return 'Пересдать не разрешили, но тему вы поняли.'})]}}},
+{id:'skipClass',ages:[12,17],w:L=>L.inSchool?1:0,make:L=>({id:'skipClass',stage:'юность',title:'Прогулять урок?',text:'Друзья зовут сбежать с последнего урока на речку.',
+    opts:[opt('Пойти с друзьями',`${up('настроение')} · ${down('знания')} · могут поймать`,0.45,()=>{L.adj({mood:4,know:-2,rel:2});if(Math.random()<0.3){L.adj({rel:-5});return 'Было здорово, но классная руководительница позвонила родителям.'}return 'Было здорово, никто не узнал.'}),
+          opt('Остаться на уроке',up('знания'),0.55,()=>{L.adj({know:1,rel:-1});return 'Вы остались. Друзья потом весь вечер рассказывали, как было весело.'})]})},
+{id:'teenParty',ages:[15,18],w:()=>0.8,make:L=>({id:'teenParty',stage:'юность',title:'Вечеринка до утра',text:'Одноклассник зовёт на вечеринку, пока его родители в отъезде.',
+    opts:[opt('Пойти',`${up('настроение')} · ${up('друзья')} · риск`,0.55,()=>{L.adj({mood:5,rel:3});L.flags.partyAt=L.age;if(Math.random()<0.25){L.adj({rel:-4});return 'Было весело, но домой вы вернулись под утро, и родители не спали.'}return 'Это была лучшая ночь года.'}),
+          opt('Остаться дома','Спокойнее',0.45,()=>{L.adj({rel:-1});return 'Вы остались дома. В понедельник все обсуждали вечеринку.'})]})},
+{id:'wallet',ages:[10,75],w:()=>0.5,make:L=>({id:'wallet',stage:'жизнь',title:'Чужой кошелёк',text:'На улице вы нашли кошелёк с деньгами и документами.',
+    opts:[opt('Вернуть хозяину',up('настроение'),0.7,()=>{L.adj({mood:5});if(Math.random()<0.25){L.adj({shock:0.05});return 'Хозяин так обрадовался, что отдал вам часть денег в благодарность.'}return 'Хозяин долго благодарил. Приятно.'}),
+          opt('Оставить деньги себе',`${up('деньги')} · ${down('настроение')}`,0.3,()=>{L.adj({shock:0.1,mood:-3});return 'Деньги пригодились, но вы ещё долго об этом вспоминали.'})]})},
+{id:'friendLoan',ages:[20,65],w:L=>L.zp!==null?0.7:0,make:L=>({id:'friendLoan',stage:'взрослость',title:'Друг просит в долг',text:'Близкий друг просит крупную сумму до зарплаты. Говорит, что вернёт через месяц.',
+    opts:[opt('Дать в долг',`${up('отношения')} · возвращают примерно 60%`,0.5,()=>{L.adj({rel:3});if(Math.random()<0.6)return 'Друг вернул всё в срок.';L.adj({shock:-0.1,rel:-4});return 'Деньги так и не вернулись. Дружба дала трещину.'}),
+          opt('Отказать',down('отношения'),0.5,()=>{L.adj({rel:-3});return 'Друг обиделся, но потом всё понял.'})]})},
+{id:'overtime',ages:[20,62],w:L=>L.working&&!L.biz?0.9:0,make:L=>({id:'overtime',stage:'взрослость',title:'Переработки',text:'Начальник предлагает работать по выходным за двойную плату.',
+    opts:[opt('Согласиться',`${up('деньги')} · ${down('здоровье')} · ${down('отношения')}`,0.5,()=>{L.adj({shock:0.12,hp:-0.015,stress:0.7,rel:-2});L.zp+=0.02;return 'Денег стало больше, а сил и времени — меньше.'}),
+          opt('Отказаться',`${up('отношения')}`,0.5,()=>{L.adj({rel:2,mood:2});return 'Выходные остались для семьи и отдыха.'})]})},
+{id:'checkup',ages:[35,80],w:L=>L.ill?0:0.7,make:(L,x,c)=>{const cost=c.gdp<15000?'Дорого':'Займёт день';
+  return {id:'checkup',stage:'здоровье',title:'Обследование',text:'Врач советует пройти полное обследование — на всякий случай.',
+    opts:[opt('Пройти',`${cost} · болезни найдут раньше · ${up('здоровье')}`,0.5,()=>{L.adj({shock:c.gdp<15000?-0.1:-0.02,hp:0.01});L.flags.checked=L.age;return 'Вы прошли обследование. Врач дал несколько советов.'}),
+          opt('Отложить','Сейчас не до этого',0.5,()=>'Вы решили, что чувствуете себя нормально.')]}}},
+{id:'vacationRepair',ages:[28,65],w:L=>L.zp!==null&&L.zEff()>-0.6?0.7:0,make:L=>({id:'vacationRepair',stage:'взрослость',title:'Отпуск или ремонт',text:'Накопилась небольшая сумма. На что её потратить?',
+    opts:[opt('Поехать в отпуск',`${up('счастье')} · ${down('стресс')}`,0.4,()=>{L.adj({mood:8,stress:-1});return 'Две недели отдыха — и мир снова в красках.'}),
+          opt('Сделать ремонт',`${up('счастье')} надолго`,0.35,()=>{L.adj({mood:3});L.pensionBoost*=1.01;return 'Дома стало уютно.'}),
+          opt('Отложить на чёрный день',up('деньги'),0.25,()=>{L.adj({shock:0.06});return 'Деньги лежат на счёте. Так спокойнее.'})]})},
+{id:'kidPhone',ages:[25,70],w:L=>kidName(L,10,15)?0.8:0,make:L=>{const k=kidName(L,10,15);
+  return {id:'kidPhone',stage:'семья',title:`${sonDaughter(k)} просит дорогой телефон`,text:`У всех в классе такой, говорит ${k.name}.`,
+    opts:[opt('Купить',`${down('деньги')} · ${up('отношения')}`,0.45,()=>{L.adj({shock:-0.08,rel:4});return `${k.name} счастлив${heShe(k,'','а')}.`}),
+          opt('Отказать и объяснить почему',down('отношения'),0.55,()=>{L.adj({rel:-3});return `${k.name} ${heShe(k,'обиделся','обиделась')}, но через неделю ${heShe(k,'отошёл','отошла')}.`})]}}},
+{id:'volunteer',ages:[16,75],w:()=>0.5,make:L=>({id:'volunteer',stage:'жизнь',title:'Волонтёрство',text:'Знакомые зовут по выходным помогать в приюте и раздавать продукты.',
+    opts:[opt('Пойти помогать',`${up('счастье')} · ${up('отношения')}`,0.45,()=>{L.adj({mood:6,rel:4,know:1});return 'Вы помогаете по выходным. Появились новые знакомые.'}),
+          opt('Нет времени','',0.55,()=>'Вы отказались: и так не хватает времени.')]})},
+{id:'language',ages:[14,50],w:()=>0.6,make:L=>{const p=clamp(0.35+L.know/120,0.2,0.9);
+  return {id:'language',stage:'учёба',title:'Иностранный язык',text:'Можно по вечерам учить английский. Это долго, но открывает двери.',
+    opts:[opt('Учить по вечерам',`${up('знания')} · доводят до конца примерно ${pct(p)}`,0.4,()=>{if(Math.random()<p){L.adj({know:6});if(L.zp!==null)L.zp+=0.04;L.flags.lang=true;return 'Через год вы уже смотрите фильмы без перевода.'}L.adj({know:2});return 'Вы бросили через три месяца, но кое-что запомнили.'}),
+          opt('Не сейчас','',0.6,()=>'Как-нибудь потом.')]}}},
+{id:'gym',ages:[20,60],w:L=>L.active?0:0.6,make:L=>({id:'gym',stage:'здоровье',title:'Спорт',text:'Друзья зовут по вечерам играть в футбол или ходить в спортзал.',
+    opts:[opt('Записаться',`${up('здоровье')} · ${up('друзья')}`,0.4,()=>{L.active=true;L.adj({hp:0.015,rel:2,shock:-0.02});return 'Теперь два вечера в неделю — спорт.'}),
+          opt('Не моё','',0.6,()=>'Вы решили, что спорт — это не ваше.')]})},
+{id:'callParents',ages:[22,65],w:L=>L.mom||L.dad?0.8:0,make:L=>({id:'callParents',stage:'семья',title:'Родители',text:'Вы давно не виделись с родителями. Мама по телефону говорит, что всё хорошо, но голос грустный.',
+    opts:[opt('Приехать в гости',`${up('отношения')} · ${up('счастье')}`,0.5,()=>{L.adj({rel:6,mood:4,shock:-0.02});return 'Вы приехали на выходные. Мама весь вечер не отпускала вашу руку.'}),
+          opt('Позвонить подольше','',0.35,()=>{L.adj({rel:2});return 'Вы проговорили целый час.'}),
+          opt('Некогда',down('отношения'),0.15,()=>{L.adj({rel:-4});return 'Вы пообещали приехать потом.'})]})},
+{id:'bigQuarrel',ages:[20,85],w:L=>L.married?0.7:0,make:L=>({id:'bigQuarrel',stage:'семья',title:'Серьёзная ссора',text:`Вы с ${L.spouse} всерьёз поругались. Каждый уверен, что прав.`,
+    opts:[opt('Уступить',`${up('отношения')} · ${down('счастье')}`,0.35,()=>{L.adj({rel:3,mood:-2});return 'Вы уступили. Дома снова мир.'}),
+          opt('Поговорить спокойно на следующий день',`${up('отношения')}, если отношения хорошие`,0.45,()=>{if(Math.random()<L.rel/100+0.2){L.adj({rel:5,mood:3});return 'Вы поговорили и поняли друг друга лучше.'}L.adj({rel:-3});return 'Разговор не получился.'}),
+          opt('Стоять на своём','Кто-то должен уступить',0.2,()=>{if(Math.random()<0.5){L.adj({mood:2});return 'В итоге уступили вам.'}L.adj({rel:-6,stress:1});return 'Вы неделю не разговаривали.'})]})},
+{id:'flood',ages:[22,80],w:L=>L.rural?0:0.4,make:L=>({id:'flood',stage:'жизнь',title:'Затопили соседи',text:'Соседи сверху затопили вашу квартиру. Потолок испорчен.',
+    opts:[opt('Потребовать возместить ущерб','Получается примерно в половине случаев',0.4,()=>{if(Math.random()<0.5){L.adj({mood:1});return 'Соседи оплатили ремонт.'}L.adj({shock:-0.06,rel:-2});return 'Соседи отказались платить. Ремонт за ваш счёт и испорченные отношения.'}),
+          opt('Договориться миром',`${up('отношения')} · ${down('деньги')}`,0.6,()=>{L.adj({shock:-0.03,rel:3});return 'Сделали ремонт пополам. Теперь вы дружите.'})]})},
+{id:'kidBullied',ages:[25,70],w:L=>kidName(L,8,14)?0.6:0,make:L=>{const k=kidName(L,8,14);
+  return {id:'kidBullied',stage:'семья',title:'Ребёнка обижают',text:`${k.name} приходит из школы грустн${heShe(k,'ым','ой')}: одноклассники смеются и не берут в игры.`,
+    opts:[opt('Поговорить с учителем',up('отношения'),0.5,()=>{L.adj({rel:3});return 'Учитель разобрался, стало легче.'}),
+          opt('Перевести в другую школу',`${down('деньги')} · надёжнее`,0.25,()=>{L.adj({shock:-0.05,rel:2});return `В новой школе у ${heShe(k,'него','неё')} быстро появились друзья.`}),
+          opt('Сказать, чтобы сам разбирался','',0.25,()=>{L.adj({rel:-3,mood:-2});return 'Пришлось справляться самому. Было непросто.'})]}}},
+{id:'ticket',ages:[18,80],w:()=>0.35,make:L=>({id:'ticket',stage:'жизнь',title:'Лотерейный билет',text:'В киоске продают лотерейные билеты. Джекпот — огромный.',
+    opts:[opt('Купить билет','Выигрывает один из сотни, и то немного',0.4,()=>{if(Math.random()<0.01){L.adj({shock:0.6,mood:10});return 'Вы выиграли! Не джекпот, но приятная сумма.'}L.adj({shock:-0.005});return 'Не выиграли. Как и почти все.'}),
+          opt('Не тратить деньги','Одна лотерея в жизни у вас уже была — рождение',0.6,()=>'Вы прошли мимо.')]})},
+{id:'food',ages:[20,55],w:(L,x,c)=>c.gdp>8000?0.5:0,make:L=>({id:'food',stage:'здоровье',title:'Еда на ходу',text:'Времени на готовку нет. Можно перейти на фастфуд или вставать пораньше.',
+    opts:[opt('Готовить дома',`${up('здоровье')} · ${down('свободное время')}`,0.5,()=>{L.adj({hp:0.015,mood:-1});return 'Вы готовите на неделю вперёд по воскресеньям.'}),
+          opt('Питаться на ходу',`${down('здоровье')} · ${up('время')}`,0.5,()=>{L.adj({hp:-0.015,mood:1});return 'Быстро, вкусно и не очень полезно.'})]})},
+{id:'helpNeighbor',ages:[16,75],w:()=>0.4,make:L=>({id:'helpNeighbor',stage:'жизнь',title:'Одинокая соседка',text:'Пожилой соседке трудно ходить в магазин и аптеку.',
+    opts:[opt('Помогать ей',`${up('счастье')} · ${up('отношения')}`,0.55,()=>{L.adj({mood:4,rel:3});return 'Вы приносите ей продукты, а она угощает вас пирогами.'}),
+          opt('Это не моё дело','',0.45,()=>'Вы решили не вмешиваться.')]})},
+{id:'promoOffer',ages:[25,50],w:L=>L.working&&L.married?0.5:0,make:L=>({id:'promoOffer',stage:'взрослость',title:'Повышение с командировками',text:'Предлагают должность выше, но половину месяца придётся быть в разъездах.',
+    opts:[opt('Согласиться',`${up('деньги')} · ${down('отношения')}`,0.5,()=>{L.zp+=0.12;L.adj({rel:-5,stress:0.5});return 'Зарплата выросла, а дома вас видят всё реже.'}),
+          opt('Отказаться',up('отношения'),0.5,()=>{L.adj({rel:3});return 'Вы остались на прежней должности, зато дома каждый вечер.'})]})}
+];
+
+/* ---- мир: один на всех, кто родился в одну секунду ---- */
+let WORLD_TL=null; // прогноз ООН по миру (data/world-timeline.json)
+function setWorld(tl){WORLD_TL=tl;STATIC_W=null}
+const OLYMPICS={2028:'в Лос-Анджелесе',2032:'в Брисбене'},CUP={2026:'в США, Канаде и Мексике',2030:'в Марокко, Испании и Португалии',2034:'в Саудовской Аравии'};
+/* Постоянная часть мира (прогноз ООН и большой спорт) считается один раз; случайная — лениво по годам с зерном,
+   чтобы у всех родившихся в одну секунду был один и тот же мир. */
+let STATIC_W=null;
+function staticWorld(){if(STATIC_W)return STATIC_W;const Y={},add=(y,e)=>(Y[y]=Y[y]||[]).push(e);
+  if(WORLD_TL){const ys=WORLD_TL.years,f=v=>String(v.toFixed(1)).replace('.',',');let peak=ys[0];for(const y of ys)if(y.pop>peak.pop)peak=y;
+    for(let i=1;i<ys.length;i++){const a=ys[i-1],b=ys[i];
+      for(const m of [9,10])if(a.pop<m&&b.pop>=m)add(b.year,{t:`Население Земли превысило ${m} миллиардов человек (прогноз ООН).`});
+      if(a.deaths<a.births&&b.deaths>=b.births)add(b.year,{t:'Впервые за много веков людей в мире умирает больше, чем рождается (прогноз ООН).'});
+      for(const m of [75,78,80])if(a.e0<m&&b.e0>=m)add(b.year,{t:`Средняя продолжительность жизни в мире достигла ${m} лет (прогноз ООН).`});
+      if(b.year%10===0)add(b.year,{t:`За этот год в мире родилось около ${Math.round(b.births)} млн детей, людей на Земле — ${f(b.pop)} млрд (прогноз ООН).`})}
+    add(peak.year,{t:`Население Земли достигло пика — около ${f(peak.pop)} млрд. Дальше оно начнёт медленно сокращаться (прогноз ООН).`})}
+  // большой спорт: известные хозяева — каждый раз, дальше — раз в двенадцать лет, чтобы не заслонять остальное
+  for(let y=2026;y<2160;y++){if(OLYMPICS[y]||(y>2032&&y%12===0))add(y,{t:`Летние Олимпийские игры${OLYMPICS[y]?' '+OLYMPICS[y]:''}.`});if(CUP[y]||(y>2034&&y%12===6))add(y,{t:`Чемпионат мира по футболу${CUP[y]?' '+CUP[y]:''}.`})}
+  return STATIC_W=Y}
+const WORLD_RANDOM=['Новая экспедиция отправилась к Луне.','Учёные сообщили о большом прорыве в лечении рака.','Сильнейшее землетрясение на другом конце света: весь мир собирает помощь.','Миллиарды людей смотрели полное солнечное затмение.'];
+function makeWorld(start,seed){
+  let s=(seed>>>0)||1;const r=()=>{s^=s<<13;s^=s>>>17;s^=s<<5;return (s>>>0)/4294967296};
+  const R={},st=staticWorld();let next=start,lastCrisis=start-5,lastPand=start-30;
+  const add=(y,e)=>(R[y]=R[y]||[]).push(e);
+  function gen(y){
+    if(y-lastCrisis>=6&&r()<0.08){lastCrisis=y;add(y,{t:'Мировой экономический кризис: цены растут, многие теряют работу.',fx:'crisis'})}
+    if(y-lastPand>=20&&r()<0.025){lastPand=y;add(y,{t:'Пандемия нового вируса: закрыты границы, школы учатся из дома.',fx:'pandemic'});add(y+1,{t:'Пандемия идёт на спад.'})}
+    if(r()<0.03+0.0015*(y-2026))add(y,{t:'Самый жаркий год за всю историю наблюдений.',fx:'heat'});
+    if(r()<0.025)add(y,{t:'Новые технологии и ИИ изменили рынок труда: часть профессий исчезает, появляются новые.',fx:'tech'});
+    if(r()<0.02)add(y,{t:WORLD_RANDOM[Math.floor(r()*WORLD_RANDOM.length)]})}
+  const EMPTY=[];
+  return {start,at(y){while(next<=y)gen(next++);const a=st[y],b=R[y];return a&&b?a.concat(b):a||b||EMPTY}};
+}
+
+/* ---- мировая статистика ---- */
+let COHORT=null,SIG=null;
+/* доля доживших до age среди всех детей мира одного года рождения (по таблицам смертности 172 стран) */
+function cohortSurvival(age){
+  if(!COHORT){COHORT=new Float64Array(MAXAGE+2);const tot=COUNTRIES.reduce((s,c)=>s+c.births,0);
+    for(const c of COUNTRIES)for(const sex of ['m','f']){const q=getTable(c,sex),w=c.births/tot*(sex==='m'?0.512:0.488);let l=1;
+      for(let x=0;x<=MAXAGE+1;x++){COHORT[x]+=w*l;if(x<=MAXAGE)l*=1-q[x]}}}
+  return COHORT[clamp(age,0,MAXAGE+1)]}
+function worldBirths(){return COUNTRIES.reduce((s,c)=>s+c.births,0)}
+/* доля людей мира, у кого доход в месяц ниже заданного (смесь распределений 172 стран по населению) */
+function worldIncomePctl(monthly){
+  if(!SIG)SIG=COUNTRIES.map(c=>[c,Math.SQRT2*ndtri((c.gini/100+1)/2)]);
+  let s=0,t=0;for(const [c,sg] of SIG){const mean=c.gdp*0.55*(calOf(c).ki||1)/12;s+=c.pop*ncdf((Math.log(Math.max(1,monthly)/mean)+sg*sg/2)/sg);t+=c.pop}
+  return Math.round(s/t*100)}
+
 /* ===== Life ===== */
 class Life{
   constructor(o={}){
@@ -395,11 +597,25 @@ class Life{
     this.dream=null;this.dreamScore=0;this.dreamWins=0;this.dreamGaveUp=false;this.forkAt=null;this.forksDone=0;
     /* этап 4: отметки ключевых событий для нити жизни и журнал дохода для графика */
     this.marks=[];this.incomeLog=[];
+    /* этап 5: показатели и мир */
+    this.know=0;this.mood=0;this.hp=0;this.young=0;this.marriedAt=null;
+    this.rel=Math.round(clamp(60+8*this.zf-(this.sibs>4?5:0),25,90));
+    this.world=o.world||makeWorld(this.born,Math.floor(Math.random()*4294967296));
     this.sibs=poisson(Math.max(0,c.fert-1)*0.7);
     this.lines=[];
   }
   g(m,f){return this.sex==='m'?m:f}
   get cal(){return calOf(this.c)}
+  /* поправки показателей: L.adj({mood, rel, know, hp, stress, shock}) */
+  adj(o){if(o.mood)this.mood=clamp(this.mood+o.mood,-40,40);if(o.rel)this.rel=clamp(this.rel+o.rel,0,100);if(o.know)this.know=clamp(this.know+o.know,0,100);
+    if(o.hp)this.hp=clamp(this.hp+o.hp,-0.5,0.3);if(o.stress)this.stress=Math.max(0,this.stress+o.stress);if(o.shock)this.shock+=o.shock}
+  /* здоровье на экране: возраст и всё, что входит в личный риск смерти */
+  /* здоровье: риск умереть в этом году по сравнению с ровесником в Японии (самая долгая жизнь среди больших стран), плюс возраст */
+  health(){if(!this.alive)return 0;const x=Math.min(this.age,MAXAGE-1),ref=BY.JP||COUNTRIES[0];
+    const qr=getTable(ref,this.sex)[x],q=this.qNow(x);
+    return Math.round(clamp(100-(x>30?(x-30)*0.55:0)-12*Math.log(Math.max(1,q/qr)),2,100))}
+  happy(){const c=this.c;return Math.round(clamp(c.sat*10+this.mood-5*Math.min(this.stress,6)+(this.married?4:0)+(this.kids.some(k=>k.alive)?3:0)-(this.ill?8:0)+(this.rel-60)*0.15,2,100))}
+  stats(){const inc=this.income();return {health:this.health(),know:Math.round(this.know),happy:this.happy(),rel:Math.round(this.rel),wealth:this.pctl(),world:worldIncomePctl(inc)}}
   zEff(){return (this.zp===null?this.zf:this.zp-this.cal.zb)+this.shock}
   incomeAt(z,c){c=c||this.c;const mean=c.gdp*0.55*(calOf(c).ki||1);return mean*Math.exp(this.sigma*z-this.sigma*this.sigma/2)/12}
   income(){let v=this.incomeAt(this.zEff());if(this.retired)v*=0.6*this.pensionBoost*(this.housing==='own'?1.1:1);return v}
@@ -416,6 +632,7 @@ class Life{
     if(this.active&&x>=25)m*=0.96;
     if(this.withKids||this.helpGrand)m*=0.96;
     m*=this.careBonus*this.yearRisk;
+    if(x>=5)m*=Math.exp(-this.hp);
     return m;
   }
   qNow(x){const qb=this.q[Math.min(x,MAXAGE)];const k=x>=5?this.cal[this.sex]:1;return qb>=1?1:1-Math.pow(1-qb,this.mult(x)*k)}
@@ -438,13 +655,13 @@ class Life{
               {label:'Уйти и работать',hint:'Деньги нужны сейчас',w:0.65,fn:()=>{this.inSchool=false;return `Вы ушли из школы после ${this.eduDone} ${plural(this.eduDone,['класса','классов','классов'])}.`}}]});
     }
     if(this.flags.uniDecision){this.flags.uniDecision=false;
-      const pDone=clamp(c.school/12,0.25,1);const ch=clamp(c.tert/100*Math.exp(0.5*this.zEff())/pDone,0.03,0.95);
+      const pDone=clamp(c.school/12,0.25,1);const ch=clamp(c.tert/100*Math.exp(0.5*this.zEff())/pDone*clamp(Math.exp(0.02*(this.know-40)),0.5,1.8),0.03,0.95);
       ds.push({id:'uni',title:'Школа окончена',text:`Вы окончили школу. ${c.inName[0].toUpperCase()+c.inName.slice(1)} в вузы поступает около ${Math.round(c.tert)}% молодых людей.`,
         opts:[{label:'Поступать в университет',hint:`Шанс поступить примерно ${Math.round(ch*100)}%`,w:ch,fn:()=>{if(Math.random()<ch){this.uni=true;this.uniLeft=4;this.flags.majorDecision=true;return 'Вы поступили в университет.'}this.flags.collegeDecision=true;return 'Поступить не получилось.'}},
               {label:'Не поступать',hint:'Колледж или работа',w:1-ch,fn:()=>{this.flags.collegeDecision=true;return 'Вы решили не поступать в университет.'}}]});
     }
     if(!this.married&&!this.childBride&&x>=18&&x<70){
-      let p=x<35?0.13:x<50?0.05:0.012;if(this.focus==='family')p*=1.5;if(this.widowed)p*=0.5;
+      let p=(x<35?0.13:x<50?0.05:0.012)*(0.6+this.rel/125);if(this.focus==='family')p*=1.5;if(this.widowed)p*=0.5;
       if(this.love&&x<30)p*=1.3;
       if(Math.random()<p){const old=this.love&&x<30&&Math.random()<0.35;const sp=old?this.love:pickName(c,this.sex==='m'?'f':'m');this.love=null;
         ds.push({id:'marry',title:'Встреча',text:old?`Вы по-прежнему вместе с ${sp}. Пора решать, что дальше.`:`Вы встретили человека по имени ${sp}. Кажется, это серьёзно.`,
@@ -479,7 +696,7 @@ class Life{
       const poor=c.gdp<20000;const months=Math.round(clamp((poor?10:3)/Math.exp(0.6*this.zEff()),1,60));
       const tp=clamp(0.5+0.4*ncdf(this.zEff()),0.2,0.95);
       ds.push({id:'ill',title:'Диагноз',text:`Врачи нашли у вас серьёзную болезнь: ${ill}.`,
-        opts:[{label:'Лечиться',hint:`Обойдётся примерно в ${months} ${plural(months,['месячный доход','месячных дохода','месячных доходов'])}`,w:tp,fn:()=>{this.illMult=1.2;this.shock-=poor?0.45:0.12;return 'Вы начали лечение.'}},
+        opts:[{label:'Лечиться',hint:`Обойдётся примерно в ${months} ${plural(months,['месячный доход','месячных дохода','месячных доходов'])}`,w:tp,fn:()=>{const early=this.flags.checked!=null&&this.age-this.flags.checked<=5;this.illMult=early?1.1:1.2;this.shock-=poor?0.45:0.12;return early?'Болезнь нашли на ранней стадии благодаря обследованию. Вы начали лечение.':'Вы начали лечение.'}},
               {label:'Не лечиться',hint:'Сохранить деньги семье',w:1-tp,fn:()=>{this.illMult=1.9;return 'Вы решили не лечиться.'}}]});
     }
     // мечта: вопрос в 10 лет и развилки в 14–16, 22–25 и 35–45 лет (вне лимита в два решения)
@@ -487,6 +704,9 @@ class Life{
     if(this.dream&&!this.dreamGaveUp&&this.forkAt&&this.forkAt[this.forksDone]===x){const st=++this.forksDone;ds.push(this.buildFork(st,forkTemplate(this,st)))}
     // выборы этапа 2: не больше двух за год, чтобы год не превращался в анкету
     let extra=0;
+    if(this.alive&&x>=8&&Math.random()<0.32){if(!CH_AGE)CH_AGE=byAge(CHOICES);
+      const C=pickWeighted(CH_AGE[Math.min(x,MAXAGE)],this,x,c);
+      if(C){const d=C.make(this,x,c);if(d){d.everyday=true;ds.push(d)}}}
     if(!DEC_AGE)DEC_AGE=byAge(DECISIONS);
     for(const D of DEC_AGE[Math.min(x,MAXAGE)]){if(extra>=2)break;if(!this.alive||!D.when(this,x,c))continue;const d=D.make(this,x,c);if(d){d.stage=D.stage;ds.push(d);extra++}}
     return ds;
@@ -497,7 +717,10 @@ class Life{
   mark(key,label){this.marks.push({age:this.age,key,label})}
   /* фаза жизни: детство, учёба, работа, старость */
   phase(){if(!this.alive)return 'dead';const a=this.age;if(a<6)return 'child';if(this.inSchool||this.uni||this.college||a<15)return 'school';if(this.retired||a>=65)return 'old';return 'work'}
-  logIncome(){this.incomeLog.push({age:this.age,inc:Math.round(this.income()),avg:Math.round(avgIncome(this.c)),ph:this.phase()})}
+  logIncome(){this.incomeLog.push({age:this.age,inc:Math.round(this.income()),avg:Math.round(avgIncome(this.c)),ph:this.phase(),hap:this.happy(),hl:this.health(),kn:Math.round(this.know)});
+    if(this.age>=25&&this.age<=60&&this.zp!==null){this.zSum=(this.zSum||0)+this.zEff();this.zN=(this.zN||0)+1}}
+  /* положение в обществе своей страны за взрослую жизнь (для «параллельных жизней») */
+  zMean(){return this.zN?this.zSum/this.zN:this.zf}
   /* ---- мечта ---- */
   dreamQuestion(){const pool=DREAM_PRESETS.slice(),pre=[];
     while(pre.length<4){const q=wpick(pool.map(v=>[v,v[1]]));pool.splice(pool.indexOf(q),1);pre.push(q[0])}
@@ -519,6 +742,7 @@ class Life{
     // там, где много детских браков, у девочек меньше дорог в спорт, науку, армию и авиацию
     if(this.sex==='f'&&c.cm>20&&['sport','military','transport','science'].includes(d.sphere))p*=0.8;
     p*=1+0.12*Math.min(this.dreamWins,3);
+    p*=clamp(Math.exp(0.008*(this.know-45)),0.75,1.3);
     if(k==='money')p*=z>0?1.05:0.65;
     return clamp(p*KIND[k][0],0.03,0.95)}
   buildFork(stage,spec){
@@ -548,7 +772,7 @@ class Life{
     return {key,score:+s.toFixed(2),title:DREAM_END[key][0],text:DREAM_END[key][1]}}
   divorce(){this.married=false;this.exSpouse=this.spouse;this.divAge=this.age;this.stress+=1;return `Вы развелись с ${this.spouse}.`}
   get spouseAge(){return this.age+(this.spDiff||0)}
-  marry(sp,spAge){this.mark('ring','Свадьба: '+sp);this.married=true;this.everMarried=true;this.spouse=sp;this.spDiff=clamp(spAge,14,90)-this.age;
+  marry(sp,spAge){this.mark('ring','Свадьба: '+sp);this.marriedAt=this.age;this.adj({mood:10,rel:5});this.married=true;this.everMarried=true;this.spouse=sp;this.spDiff=clamp(spAge,14,90)-this.age;
     if(this.sex==='f'&&this.working&&['ME','SA'].includes(this.c.region)&&Math.random()<0.55){this.working=false;this.homemaker=true}}
   pickDest(){const list=(DEST[this.c.region]||DEST.HI).map(([k,w])=>[BY[k],w]).filter(([d])=>d&&d.code!==this.c.code&&d.gdp>this.c.gdp*1.2);return list.length?wpick(list):null}
   migrate(d){if(Math.random()<0.7){const from=this.c;this.c=d;this.migrated=true;this.mark('move','Переезд: '+d.name);this.rural=false;this.q=getTable(d,this.sex);this.sigma=Math.SQRT2*ndtri((d.gini/100+1)/2);
@@ -560,7 +784,7 @@ class Life{
     const mj=tier==='uni'&&this.major?MAJORS[this.major]:null;
     this.job=mj?mj[1][this.sex==='m'?0:1]:pick(JOBS[tier][this.sex]);this.working=true;if(!this.flags.firstJob){this.flags.firstJob=true;this.mark('work','Первая работа: '+this.job)}
     this.zp=0.55*this.zf+0.6*gauss()+0.12*(this.eduDone-c.school)+(this.degree?0.4:0)-(tier==='agri'?0.3:0)
-      +(mj?mj[2]*(this.major==='it'&&c.gdp<15000?0.5:1):0)+(this.flags.honors?0.12:0)+(this.flags.uniWork?0.08:0)+(this.flags.collegeDone?0.15:0);
+      +(mj?mj[2]*(this.major==='it'&&c.gdp<15000?0.5:1):0)+(this.flags.honors?0.12:0)+(this.flags.uniWork?0.08:0)+(this.flags.collegeDone?0.15:0)+0.005*(this.know-40);
     return `${x<15?'Уже в '+yrs(x)+' вы':'Вы'} начали работать: ${this.job}.`}
   endYear(){
     const x=this.age,c=this.c,ev=[];if(!this.alive)return ev;
@@ -616,6 +840,22 @@ class Life{
     // события года: привычки, урожай, кризисы, удачи и неудачи
     if(!EV_AGE)EV_AGE=byAge(EVENTS);
     for(const E of EV_AGE[Math.min(x,MAXAGE)]){if(E.when(this,x,c)&&Math.random()<E.p(this,x,c)){const e=E.fire(this,x,c);if(e){e.id=E.id;ev.push(e)}}}
+    // знания растут от учёбы и работы
+    this.adj({know:(x>=3&&x<6&&this.zf>-0.5?1.5:0)+(this.inSchool?3.5+(this.focus==='study'?1.5:0):0)+(this.uni?5:0)+(this.college?4:0)+(this.working?0.4+(this.degree?0.4:0):0)-(x>70?0.3:0)});
+    // одно обычное событие года (у детей чаще)
+    if(Math.random()<(x<18?0.8:x<65?0.65:0.6)){if(!DAY_AGE)DAY_AGE=byAge(DAILY);
+      const D=pickWeighted(DAY_AGE[Math.min(x,MAXAGE)],this,x,c);
+      if(D){const e=D.fire(this,x,c);if(e){e.id=D.id;e.daily=true;ev.push(e)}}}
+    // что происходит в мире
+    for(const w of this.world.at(this.born+x)){const e={k:'world',t:w.t,id:'world'};
+      if(w.fx==='crisis'){this.shock-=0.25;if(this.working&&Math.random()<0.12){this.shock-=0.4;this.stress+=1;e.t+=' Вы потеряли работу.'}}
+      else if(w.fx==='pandemic'){this.yearRisk*=x>=65?1.3:x<5?1.1:1.08;this.shock-=0.1;this.adj({mood:-5,rel:-2})}
+      else if(w.fx==='heat'){if(x>=70)this.yearRisk*=1.03}
+      else if(w.fx==='tech'&&this.working&&/водител|продав|кассир|рабоч|бухгалтер|грузч|администратор|работниц/.test(this.job||'')&&Math.random()<0.15){this.shock-=0.4;this.adj({know:3,stress:1});e.t+=' Вашу работу заменили машины — пришлось переучиваться.'}
+      ev.push(e)}
+    // настроение возвращается к обычному, отношения — к среднему; несчастье добавляет стресс
+    this.mood*=0.7;this.rel+=(60-this.rel)*0.08;
+    const hp=this.happy();if(hp<35)this.stress+=0.4;else if(hp>75)this.stress*=0.85;
     this.stress=Math.max(0,this.stress*0.75);
     // occasional facts
     const st=this.statFact(x);if(st)ev.push({k:'stat',t:st});
@@ -672,10 +912,12 @@ class Life{
     if(this.kids.length)s+=`, ${alive} ${plural(alive,['ребёнок','ребёнка','детей'])}`;return s}
   snapshot(){return {age:this.age,alive:this.alive,status:this.status(),cause:this.cause,ph:this.phase()}}
 }
-function simulateFull(mode,soft){const L=new Life({auto:true,mode,soft});L.init();const snaps=[L.snapshot()];let g=0;
+/* доход в месяц для того же положения (z) в другой стране */
+function incomeIn(c,z){const sg=Math.SQRT2*ndtri((c.gdp?c.gini:35)/100/2+0.5);return c.gdp*0.55*(calOf(c).ki||1)*Math.exp(sg*z-sg*sg/2)/12}
+function simulateFull(mode,soft,world){const L=new Life({auto:true,mode,soft,world});L.init();const snaps=[L.snapshot()];let g=0;
   while(L.alive&&g++<130){const ds=L.beginYear();for(const d of ds)L.resolve(d,L.autoChoice(d));L.endYear();snaps.push(L.snapshot())}
   return {L,snaps}}
 
-return {COUNTRIES,BY,NAMES,DECISIONS,EVENTS,DRAFT,SPHERES,KIND,classifyDreamLocal,forkTemplate,Life,simulateFull,getTable,e0,survTo,avgLE,avgIncome,ruralShare,pickCountry,setData,setCal:v=>{CAL=v},getCal:()=>CAL,
+return {DAILY,CHOICES,makeWorld,setWorld,cohortSurvival,worldBirths,worldIncomePctl,incomeIn,COUNTRIES,BY,NAMES,DECISIONS,EVENTS,DRAFT,SPHERES,KIND,classifyDreamLocal,forkTemplate,Life,simulateFull,getTable,e0,survTo,avgLE,avgIncome,ruralShare,pickCountry,setData,setCal:v=>{CAL=v},getCal:()=>CAL,
   clamp,gauss,ndtri,ncdf,plural,yrs,money,pick,wpick,MAXAGE};
 });

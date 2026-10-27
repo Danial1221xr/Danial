@@ -6,6 +6,8 @@ const $=s=>document.querySelector(s);
 async function loadJSON(p){const r=await fetch(p);if(!r.ok)throw new Error(p+": "+r.status);return r.json()}
 try{
   const [cs,names,cal]=await Promise.all([loadJSON("data/countries.json"),loadJSON("data/names.json"),loadJSON("data/cal.json")]);
+  // прогноз ООН по миру нужен только для новостей «Мир»: без него игра тоже работает
+  try{E.setWorld(await loadJSON("data/world-timeline.json"))}catch(e){console.warn(e)}
   E.setData(cs.countries,names,cal);
 }catch(e){
   console.error(e);
@@ -47,8 +49,10 @@ loadJSON('data/world.json').then(world=>{
 
 /* ---------- life ---------- */
 function startLife(){
-  G.L=new Life({mode:S.mode,soft:S.soft});G.notes=[];
-  G.nbs=[0,1,2,3].map(()=>simulateFull(S.mode,S.soft));
+  // один мир на всех, кто родился в эту секунду: те же кризисы, эпидемии и новости
+  G.world=E.makeWorld(new Date().getFullYear(),Math.floor(Math.random()*4294967296));
+  G.L=new Life({mode:S.mode,soft:S.soft,world:G.world});G.notes=[];
+  G.nbs=[0,1,2,3].map(()=>simulateFull(S.mode,S.soft,G.world));
   G.yearDur=(+S.dur*60)/avgLE(G.L.c);G.acc=0;G.queue=[];G.modal=false;G.quitArm=false;G.endShown=false;
   $('#feed').innerHTML='';phase.fill(undefined);buildThread();G.stageKey=G.portraitKey=null;$('#sceneWrap').innerHTML=$('#ptWrap').innerHTML='';
   setFocus('study');
@@ -136,7 +140,7 @@ function pauseQ(L){const c=L.c;
   const p=Math.round(survTo(L.home,L.sex,70)*100);return `До семидесяти лет ${L.home.inName} доживают примерно ${p}% ${L.sex==='m'?'мужчин':'женщин'}. Что для вас значит долгая жизнь?`}
 
 function addFeed(age,e){const li=document.createElement('li');li.className=e.k||'info';
-  li.innerHTML=`<span class="a">${age} ${plural(age,['год','года','лет'])}</span><div><div class="t">${esc(e.t)}</div>${e.help?`<div class="help">${HELP}</div>`:''}</div>`;
+  li.innerHTML=`<span class="a">${age} ${plural(age,['год','года','лет'])}</span><div><div class="t">${e.k==='world'?'<span class="tag">Мир</span>':''}${esc(e.t)}</div>${e.help?`<div class="help">${HELP}</div>`:''}</div>`;
   const f=$('#feed');f.insertBefore(li,f.firstChild)}
 
 function buildThread(){const th=$('#thread');th.innerHTML='';$('#marks').innerHTML='';$('#marks').dataset.n='';for(let i=0;i<100;i++){const t=document.createElement('div');t.className='tick';t.appendChild(document.createElement('i'));th.appendChild(t)}
@@ -165,14 +169,26 @@ function renderAll(){const L=G.L;if(!L)return;
   const rows=[['Где',`${L.rural?'Деревня':'Город'}, ${L.c.name}`],['Занятие',cap(L.status())],['Семья',cap(L.family())],
     [L.zp===null||L.homemaker?'Доход семьи':'Доход',`<span class="mono">${money(inc)}</span> в месяц <div class="pct">${p<50?`беднее ${100-p}% людей страны`:`богаче ${p}% людей страны`}</div>`],
     ['Учёба',L.degree?'высшее образование':L.eduDone?`${L.eduDone} ${plural(L.eduDone,['класс','класса','классов'])}`:(L.age<7?'ещё рано':'не учился')],
-    ['Здоровье',[L.smoker?'курит':'',L.drinker?'часто выпивает':'',L.active&&L.age>=7?'занимается спортом':'',L.ill?(L.illMult<1.5?'лечится: ':'болеет: ')+L.ill:''].filter(Boolean).join(', ')||'без серьёзных проблем']];
+    ['Привычки',[L.smoker?'курит':'',L.drinker?'часто выпивает':'',L.active&&L.age>=7?'занимается спортом':'',L.ill?(L.illMult<1.5?'лечится: ':'болеет: ')+L.ill:''].filter(Boolean).join(', ')||'без вредных привычек и болезней']];
   const home={mortgage:`ипотека, осталось ${yrs(L.mortLeft)}`,build:'строит свой дом',rent:'снимает жильё',parents:'живёт с родителями',own:'своё жильё'}[L.housing];
   const money2=[home,L.debt>0?'выплачивает кредит':'',L.biz?'своё дело':''].filter(Boolean).join(', ');
   if(money2)rows.push(['Жильё и деньги',money2]);
   if(L.dream)rows.push(['Мечта',L.dream.title+(L.dreamGaveUp?' (отпущена)':'')]);
   if(!L.alive)rows[1]=['Итог',cap(L.status())+', '+L.cause];
   $('#nowDl').innerHTML=rows.map(r=>`<dt>${r[0]}</dt><dd>${r[0]==='Доход'||r[0]==='Доход семьи'?r[1]:esc(r[1])}</dd>`).join('');
+  renderStats(L);renderGen(L);
   renderThread();renderNbs();renderFacts();renderStage(L);updFocusHint()}
+/* показатели 0–100, как в паспорте жизни */
+const STAT_LBL=[['health','Здоровье'],['know','Знания'],['happy','Счастье'],['rel','Отношения'],['wealth','Достаток']];
+function renderStats(L){const st=L.stats();
+  $('#stats').innerHTML=STAT_LBL.map(([k,l])=>{const v=st[k];return `<div class="stat st-${k}" title="${l}: ${v} из 100"><span class="sl">${l}</span><span class="bar" role="meter" aria-label="${l}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${v}"><i style="width:${v}%"></i></span><span class="sv mono">${v}</span></div>`}).join('')
+    +`<p class="stat-note">Достаток — место среди людей вашей страны. Среди всех людей мира вы богаче ${st.world}%.</p>`}
+/* поколение: все дети мира, родившиеся в один год с вами */
+function renderGen(L){const born=E.worldBirths()/1000,a=L.age,alive=E.cohortSurvival(a+(L.alive?0:1));
+  const f=v=>v>=10?Math.round(v):v.toFixed(1).replace('.',',');
+  $('#gen').innerHTML=`<p>В ${L.born} году в мире родилось около <b class="mono">${f(born)} млн</b> детей. ${a?`До ${yrs(a)} дожили примерно <b class="mono">${Math.round(alive*100)}%</b> — около ${f(born*alive)} млн человек.`:'Все они начинают жизнь в одну и ту же секунду истории, но в очень разных местах.'}</p>
+    <div class="genbar" aria-hidden="true"><i style="width:${(alive*100).toFixed(1)}%"></i></div>
+    <p class="muted" style="font-size:13px;margin:6px 0 0">${L.home.inName[0].toUpperCase()+L.home.inName.slice(1)} до этого возраста доживают ${Math.round(survTo(L.home,L.sex,a)*100)}% ${L.sex==='m'?'мальчиков':'девочек'}.</p>`}
 /* портрет и фон этапа жизни; смена — плавным наложением слоёв */
 function swapLayer(box,html){const old=[...box.children];const el=document.createElement('div');el.className='layer';el.innerHTML=html;box.appendChild(el);
   requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('on')));old.forEach(o=>{o.classList.remove('on');setTimeout(()=>o.remove(),700)})}
@@ -196,6 +212,21 @@ function renderFacts(){const c=G.L.home;$('#factsTitle').textContent='Стати
     return `<tr><td>${label}${note?`<div class="src">${esc(note)}</div>`:''}</td><td>${est?'≈ ':''}${val}</td></tr>`}).join('')}
 
 /* ---------- end ---------- */
+/* итоги жизни по показателям */
+function statsEnd(L){const lg=L.incomeLog.filter(x=>x.age>=1);if(!lg.length)return '';
+  const avg=k=>Math.round(lg.reduce((s,x)=>s+x[k],0)/lg.length),best=lg.reduce((b,x)=>x.hap>b.hap?x:b,lg[0]);
+  return `<div class="card"><div class="sect-h">Итоги жизни</div><div class="sum">
+    <div><b>${avg('hap')}</b><span>счастье в среднем за жизнь</span></div>
+    <div><b>${Math.max(...lg.map(x=>x.kn))}</b><span>знания на пике</span></div>
+    <div><b>${avg('hl')}</b><span>здоровье в среднем</span></div>
+    <div><b>${best.age}</b><span>самый счастливый возраст</span></div></div></div>`}
+/* «параллельные жизни»: то же место в обществе — в других странах */
+function parallelHtml(L){const z=L.zMean(),p=Math.round(E.ncdf(z)*100),le=c=>L.sex==='m'?c.leM:c.leF;
+  const pool=['NO','US','CN','IN','NG','BR','DE','RU','KZ','NE'].filter(k=>BY[k]&&k!==L.home.code);
+  const pickC=[];while(pickC.length<4&&pool.length)pickC.push(pool.splice(Math.floor(Math.random()*pool.length),1)[0]);
+  const rows=[L.home.code,...pickC].map(k=>{const c=BY[k];return `<tr${k===L.home.code?' class="you"':''}><td>${esc(c.name)}</td><td class="mono">${money(E.incomeIn(c,z))}</td><td class="mono">${le(c).toFixed(1).replace('.',',')}</td></tr>`}).join('');
+  return `<div class="card parallel"><div class="sect-h">Параллельные жизни</div><p class="muted" style="margin:0 0 8px;font-size:14px">Вы были богаче ${p}% людей своей страны. Вот как жил бы человек на том же месте в обществе, родись он в другой стране.</p>
+    <table><tr><th>Страна</th><th>Доход в месяц</th><th>Живут в среднем</th></tr>${rows}</table></div>`}
 function endLife(){const L=G.L;if(!L||G.endShown)return;G.endShown=true;closeSheet();G.queue=[];
   const kidsAlive=L.kids.filter(k=>k.alive).length;
   const heavy=['hom','sui'].includes(L.causeKey);
@@ -218,6 +249,8 @@ function endLife(){const L=G.L;if(!L||G.endShown)return;G.endShown=true;closeShe
       <div><b>${L.kids.length}${L.lostKids?' / −'+L.lostKids:''}</b><span>детей${L.lostKids?' / умерли в детстве':''}</span></div>
     </div>
     ${dreamHtml}
+    ${statsEnd(L)}
+    ${parallelHtml(L)}
     ${G.notes.length?`<div class="card"><div class="sect-h">Ваши записи</div>${G.notes.map(n=>`<p style="margin:0 0 8px"><span class="mono muted">${n.age}</span> «${esc(n.a)}»</p>`).join('')}</div>`:''}
     <div class="card"><div class="sect-h">Доход за жизнь</div><p class="muted" style="margin:0 0 8px;font-size:13px">В месяц, по паритету покупательной способности. До первой работы — доход семьи на человека.</p><div id="incChart"></div></div>
     <div class="card"><div class="sect-h">Линии жизни: вы и родившиеся в ту же секунду</div><div id="lifeLines"></div><ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px">${nbHtml}</ul></div>
