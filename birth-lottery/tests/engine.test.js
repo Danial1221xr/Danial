@@ -4,7 +4,7 @@ const assert = require('node:assert');
 const { loadEngine } = require('../tools/load-engine');
 
 const E = loadEngine();
-const NUM = ['births', 'pop', 'leM', 'leF', 'imr', 'u5', 'gdp', 'gini', 'school', 'tert', 'agri', 'fert', 'mmr', 'hiv', 'hom', 'smoke', 'sat', 'cm'];
+const NUM = ['births', 'pop', 'leM', 'leF', 'imr', 'u5', 'gdp', 'gini', 'school', 'tert', 'agri', 'fert', 'mmr', 'hiv', 'hom', 'smoke', 'sat', 'cm', 'urb'];
 const REGIONS = ['SA', 'EA', 'SSA', 'ME', 'LA', 'EE', 'CA', 'HI'];
 
 function live(L, choose) {
@@ -40,6 +40,23 @@ test('данные стран полные и числовые', () => {
     for (const f of NUM) assert.ok(Number.isFinite(c[f]) && c[f] >= 0, `${c.code}.${f} = ${c[f]}`);
     assert.ok(c.leM > 40 && c.leM < 90 && c.leF > 40 && c.leF < 95, 'LE ' + c.code);
     assert.ok(c.u5 >= c.imr, 'детская смертность не меньше младенческой ' + c.code);
+  }
+});
+
+test('172 страны, у каждой цифры есть источник и год (или пометка «оценка»)', () => {
+  assert.strictEqual(E.COUNTRIES.length, 172);
+  for (const c of E.COUNTRIES) for (const f of NUM) {
+    const s = c.src && c.src[f];
+    assert.ok(s && s.s, `источник ${c.code}.${f}`);
+    assert.ok(s.est || Number.isInteger(s.y), `год ${c.code}.${f}`);
+  }
+});
+
+test('у каждой страны есть поправки калибровки', () => {
+  const cal = E.getCal();
+  for (const c of E.COUNTRIES) {
+    const k = cal[c.code];
+    assert.ok(k && k.m > 0 && k.f > 0 && k.ki > 0 && Number.isFinite(k.zb), 'CAL ' + c.code);
   }
 });
 

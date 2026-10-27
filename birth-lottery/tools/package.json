@@ -1,0 +1,14 @@
+{
+  "name": "birth-lottery-tools",
+  "private": true,
+  "description": "Инструменты для подготовки данных «Лотереи рождения». Самой игре эти зависимости не нужны.",
+  "scripts": {
+    "fetch-data": "node fetch-data.js",
+    "calibrate": "node calibrate.js",
+    "build-map": "node build-map.js"
+  },
+  "devDependencies": {
+    "seek-bzip": "2.0.0",
+    "world-countries": "^5.1.0"
+  }
+}

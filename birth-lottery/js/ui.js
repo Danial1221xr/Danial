@@ -1,7 +1,7 @@
 /* Интерфейс: экраны «Старт», «Жизнь», «Конец», «Мемориалы», модальные окна решений и пауз. */
 (async function(){
 const E=window.LR.engine;
-const {COUNTRIES,BY,Life,simulateFull,avgLE,yrs,plural,money,survTo}=E;
+const {COUNTRIES,BY,Life,simulateFull,avgLE,avgIncome,yrs,plural,money,survTo}=E;
 const $=s=>document.querySelector(s);
 async function loadJSON(p){const r=await fetch(p);if(!r.ok)throw new Error(p+": "+r.status);return r.json()}
 try{
@@ -137,9 +137,13 @@ function nbAt(n,age){const s=n.snaps;const i=Math.min(age,s.length-1);return s[i
 function renderNbs(){const L=G.L;$('#nbs').innerHTML=G.nbs.map(n=>{const s=nbAt(n,L.age);const dead=!s.alive;
   return `<div class="nb${dead?' dead':''}"><b>${esc(n.L.name)}</b><span>${esc(n.L.home.name)}${n.L.migrated&&!dead?'':''}</span><div class="st">${dead?esc(s.status+(s.cause?': '+s.cause:'')):esc(cap(s.status))}</div></div>`}).join('')}
 
+const SRC_NAME={wpp:'ООН, WPP 2024',wdi:'Всемирный банк',bl:'Barro–Lee',whr:'World Happiness Report',gapminder:'Gapminder',region:'среднее по региону',proto:'прототип'};
+const num=(v,d)=>(d===undefined?String(v):v.toFixed(d)).replace('.',',');
+function srcNote(c,f){const s=c.src&&c.src[f];if(!s)return '';return `${SRC_NAME[s.s]||s.s}${s.y?', '+s.y:''}${s.est?' · оценка':''}`}
 function renderFacts(){const c=G.L.home;$('#factsTitle').textContent='Статистика: '+c.name;
-  const r=[['Продолжительность жизни, муж. / жен.',`${c.leM} / ${c.leF}`],['Не доживают до 5 лет',`${(c.u5/10).toFixed(1).replace('.',',')}%`],['ВВП на душу (ППС), $',c.gdp.toLocaleString('ru-RU')],['Индекс Джини',c.gini],['Средние годы учёбы',String(c.school).replace('.',',')],['Охват высшим образованием',c.tert+'%'],['Занятость в сельском хозяйстве',c.agri+'%'],['Детей на женщину',String(c.fert).replace('.',',')],['Материнская смертность на 100 000 родов',c.mmr],['Убийств на 100 000',String(c.hom).replace('.',',')],['Курят',c.smoke+'%'],['Удовлетворённость жизнью (0–10)',String(c.sat).replace('.',',')]];
-  $('#factsTbl').innerHTML=r.map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('')}
+  const r=[[['leM','leF'],'Продолжительность жизни, муж. / жен.',`${num(c.leM)} / ${num(c.leF)}`],['u5','Не доживают до 5 лет',`${num(c.u5/10,1)}%`],['gdp','ВВП на душу (ППС), $',c.gdp.toLocaleString('ru-RU')],['gini','Индекс Джини',num(c.gini)],['school','Средние годы учёбы взрослых',num(c.school)],['tert','Охват высшим образованием',c.tert+'%'],['agri','Занятость в сельском хозяйстве',num(c.agri)+'%'],['urb','Живут в городах',c.urb+'%'],['fert','Детей на женщину',num(c.fert)],['mmr','Материнская смертность на 100 000 родов',c.mmr],['hom','Убийств на 100 000',num(c.hom)],['smoke','Курят',num(c.smoke)+'%'],['sat','Удовлетворённость жизнью (0–10)',num(c.sat)]];
+  $('#factsTbl').innerHTML=r.map(([f,label,val])=>{const fs=[].concat(f);const est=fs.some(k=>c.src&&c.src[k]&&c.src[k].est);const note=[...new Set(fs.map(k=>srcNote(c,k)))].join('; ');
+    return `<tr><td>${label}${note?`<div class="src">${esc(note)}</div>`:''}</td><td>${est?'≈ ':''}${val}</td></tr>`}).join('')}
 
 /* ---------- end ---------- */
 function endLife(){const L=G.L;if(!L||G.endShown)return;G.endShown=true;closeSheet();G.queue=[];
@@ -148,7 +152,7 @@ function endLife(){const L=G.L;if(!L||G.endShown)return;G.endShown=true;closeShe
   const le=L.sex==='m'?L.home.leM:L.home.leF;
   const nbHtml=G.nbs.map(n=>{const d=n.L;return `<li><b>${esc(d.name)}</b>, ${esc(d.home.name)}${d.migrated?' → '+esc(d.c.name):''}: ${d.sex==='m'?'прожил':'прожила'} ${yrs(d.age)}${d.cause?' ('+esc(d.cause)+')':''}${d.degree?', высшее образование':''}${d.kids.length?`, ${d.kids.length} ${plural(d.kids.length,['ребёнок','ребёнка','детей'])}`:''}.</li>`}).join('');
   let cmp='';if(S.real&&BY[S.real]){const r=BY[S.real];const rl=L.sex==='m'?r.leM:r.leF;
-    cmp=`<div class="card cmp"><div class="sect-h">Сравнение с вашей страной</div><p style="margin:0">${cap(r.inName)} ${L.sex==='m'?'мужчины':'женщины'} живут в среднем ${yrs(rl)}, а ${L.home.inName} — ${yrs(le)}. Средний доход ${r.inName} примерно ${money(r.gdp*0.55/12)} в месяц на человека, ${L.home.inName} — ${money(L.home.gdp*0.55/12)}. До пяти лет не доживает ${(r.u5/10).toFixed(1).replace('.',',')}% детей против ${(L.home.u5/10).toFixed(1).replace('.',',')}%.</p></div>`}
+    cmp=`<div class="card cmp"><div class="sect-h">Сравнение с вашей страной</div><p style="margin:0">${cap(r.inName)} ${L.sex==='m'?'мужчины':'женщины'} живут в среднем ${yrs(rl)}, а ${L.home.inName} — ${yrs(le)}. Средний доход ${r.inName} примерно ${money(avgIncome(r))} в месяц на человека, ${L.home.inName} — ${money(avgIncome(L.home))}. До пяти лет не доживает ${(r.u5/10).toFixed(1).replace('.',',')}% детей против ${(L.home.u5/10).toFixed(1).replace('.',',')}%.</p></div>`}
   $('#endBox').innerHTML=`
     <div class="eyebrow">${esc(L.home.name)}${L.migrated?' → '+esc(L.c.name):''}</div>
     <h1>${esc(L.name)}</h1>

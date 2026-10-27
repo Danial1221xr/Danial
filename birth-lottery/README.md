@@ -44,3 +44,21 @@ node tools/calibrate.js          # пересчитать data/cal.json
 node tools/calibrate.js --check  # только проверить отклонения
 node --test                      # тесты движка
 ```
+
+## Данные стран
+
+`data/countries.json` собирается скриптом `tools/fetch-data.js` из открытых источников (172 страны, у каждой цифры — источник и год в поле `src`, оценки помечены `est: true`):
+
+- UN World Population Prospects 2024 — рождения, население, продолжительность жизни (R-пакет ООН `wpp2024` на GitHub);
+- World Bank World Development Indicators — смертность детей, ВВП ППС, Джини, образование, занятость, здоровье, урбанизация (по умолчанию через зеркало Gapminder на GitHub, с флагом `--official` — напрямую через api.worldbank.org);
+- Barro–Lee v3 — средние годы учёбы взрослых;
+- World Happiness Report — удовлетворённость жизнью;
+- Gapminder — запасной источник для стран без данных Всемирного банка (Тайвань, КНДР, Куба и др.).
+
+```
+cd tools && npm install && cd ..
+node tools/fetch-data.js
+node tools/calibrate.js
+```
+
+Русские названия, регионы и группы имён стран — в `tools/country-meta.js`, имена — в `data/names.json`. Сверка старых цифр прототипа с источниками — `data/comparison-prototype.md`, последний отчёт калибровки — `tools/calibration-report.txt`.

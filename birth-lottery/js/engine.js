@@ -12,14 +12,14 @@ function setData(countries,names,cal){
 }
 
 const DEST={
- CA:[['RU',5],['KZ',2],['KR',1],['DE',1],['TR',1]],
- SA:[['SA',3],['US',2],['GB',2],['CA',1],['AU',1]],
- ME:[['DE',2],['TR',2],['SA',2],['FR',1],['GB',1],['US',1]],
- SSA:[['ZA',2],['FR',2],['GB',2],['US',2],['SA',1],['DE',1]],
- LA:[['US',6],['AR',1],['CA',1]],
- EA:[['US',3],['JP',2],['KR',2],['AU',2],['SA',1]],
- EE:[['PL',3],['DE',3],['US',1],['KZ',1]],
- HI:[['US',2],['GB',1],['CA',1],['AU',1],['DE',1]]
+ CA:[['RU',5],['KZ',2],['KR',1],['DE',1],['TR',1],['AE',1]],
+ SA:[['AE',3],['SA',3],['US',2],['GB',2],['CA',1],['AU',1],['QA',1]],
+ ME:[['DE',2],['TR',2],['SA',2],['AE',2],['FR',1],['GB',1],['US',1],['SE',1]],
+ SSA:[['ZA',2],['FR',2],['GB',2],['US',2],['SA',1],['DE',1],['IT',1],['BE',1]],
+ LA:[['US',6],['ES',2],['AR',1],['CL',1],['CA',1]],
+ EA:[['US',3],['JP',2],['KR',2],['AU',2],['SG',1],['TW',1],['SA',1]],
+ EE:[['DE',3],['PL',2],['IT',1],['CZ',1],['GB',1],['US',1],['RU',1]],
+ HI:[['US',2],['GB',1],['CA',1],['AU',1],['DE',1],['CH',1]]
 };
 
 /* ===== math ===== */
@@ -50,6 +50,12 @@ const TBL={};
 function getTable(c,sex){const k=c.code+sex;if(TBL[k])return TBL[k];const target=sex==='m'?c.leM:c.leF;let lo=Math.log(1e-8),hi=Math.log(0.3);for(let i=0;i<48;i++){const mid=(lo+hi)/2;if(e0(baseQ(c,sex,Math.exp(mid)))>target)lo=mid;else hi=mid}return TBL[k]=baseQ(c,sex,Math.exp((lo+hi)/2))}
 function survTo(c,sex,age){const q=getTable(c,sex);let l=1;for(let x=0;x<age;x++)l*=1-q[x];return l}
 
+/* доля сельских жителей: по урбанизации ООН, если её нет — по занятости в сельском хозяйстве */
+function ruralShare(c){return clamp(c.urb!=null?1-c.urb/100:c.agri/100*1.15+0.05,0.02,0.9)}
+/* поправки калибровки: m, f — смертность, zb — центр дохода, ki — множитель среднего дохода */
+function calOf(c){return CAL[c.code]||{m:1,f:1,zb:0,ki:1}}
+/* средний доход в стране в месяц (ВВП ППС × 0,55 / 12) */
+function avgIncome(c){return c.gdp*0.55/12}
 function pickCountry(mode){return wpick(COUNTRIES.map(c=>[c,mode==='pop'?c.pop:c.births]))}
 function pickName(c,sex){return pick(NAMES[c.names][sex])}
 function avgLE(c){return (c.leM+c.leF)/2}
@@ -70,7 +76,7 @@ class Life{
     this.home=c;this.c=c;this.sex=Math.random()<0.512?'m':'f';
     this.name=pickName(c,this.sex);this.born=o.year||new Date().getFullYear();
     this.age=0;this.alive=true;this.focus='study';
-    this.rural=Math.random()<clamp(c.agri/100*1.15+0.05,0.03,0.85);
+    this.rural=Math.random()<ruralShare(c);
     this.zf=ndtri(clamp(Math.random(),0.005,0.995))-(this.rural?0.35:0);
     this.zp=null;this.shock=0;
     this.sigma=Math.SQRT2*ndtri((c.gini/100+1)/2);
@@ -91,9 +97,9 @@ class Life{
     this.lines=[];
   }
   g(m,f){return this.sex==='m'?m:f}
-  get cal(){return CAL[this.c.code]||{m:1,f:1,zb:0}}
+  get cal(){return calOf(this.c)}
   zEff(){return (this.zp===null?this.zf:this.zp-this.cal.zb)+this.shock}
-  incomeAt(z,c){c=c||this.c;const mean=c.gdp*0.55;return mean*Math.exp(this.sigma*z-this.sigma*this.sigma/2)/12}
+  incomeAt(z,c){c=c||this.c;const mean=c.gdp*0.55*(calOf(c).ki||1);return mean*Math.exp(this.sigma*z-this.sigma*this.sigma/2)/12}
   income(){let v=this.incomeAt(this.zEff());if(this.retired)v*=0.6;return v}
   pctl(){return Math.round(ncdf(this.zEff())*100)}
   mult(x){
@@ -179,7 +185,7 @@ class Life{
       if(this.zp!==null)this.zp=this.zp*0.5-0.6;else this.zp=-0.8;this.shock=0;return `Вы уехали. Новая страна: ${d.name}. Первое время будет трудно.`}
     return 'Уехать не вышло: документы не одобрили.'}
   startWork(){const c=this.c,x=this.age;let tier;
-    if(this.rural&&Math.random()<clamp(c.agri/100*1.4,0,0.95))tier='agri';
+    if(this.rural&&Math.random()<clamp(c.agri/100/ruralShare(c),0,0.95))tier='agri';
     else if(this.degree)tier='uni';else if(this.eduDone>=12)tier=Math.random()<0.6?'hi':'mid';else if(this.eduDone>=7)tier='mid';else tier='low';
     this.job=pick(JOBS[tier][this.sex]);this.working=true;
     this.zp=0.55*this.zf+0.6*gauss()+0.12*(this.eduDone-c.school)+(this.degree?0.4:0)-(tier==='agri'?0.3:0);
@@ -288,6 +294,6 @@ function simulateFull(mode,soft){const L=new Life({auto:true,mode,soft});L.init(
   while(L.alive&&g++<130){const ds=L.beginYear();for(const d of ds)L.resolve(d,L.autoChoice(d));L.endYear();snaps.push(L.snapshot())}
   return {L,snaps}}
 
-return {COUNTRIES,BY,NAMES,Life,simulateFull,getTable,e0,survTo,avgLE,pickCountry,setData,setCal:v=>{CAL=v},getCal:()=>CAL,
+return {COUNTRIES,BY,NAMES,Life,simulateFull,getTable,e0,survTo,avgLE,avgIncome,ruralShare,pickCountry,setData,setCal:v=>{CAL=v},getCal:()=>CAL,
   clamp,gauss,ndtri,ncdf,plural,yrs,money,pick,wpick,MAXAGE};
 });

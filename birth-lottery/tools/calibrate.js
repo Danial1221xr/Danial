@@ -2,10 +2,12 @@
 // Запуск из папки игры:  node tools/calibrate.js            (полная калибровка, несколько минут)
 //                        node tools/calibrate.js --check    (только проверка текущих поправок)
 //                        node tools/calibrate.js --only KZ,RU --n 4000
+//                        node tools/calibrate.js --reset    (начать с нуля, а не с текущих поправок)
 // Нужен после любых изменений данных стран или правил смертности/дохода.
 // Для каждой страны и пола симулирует тысячи жизней и подгоняет:
 //   m, f — множитель смертности, чтобы средний возраст смерти ≈ ожидаемая продолжительность жизни − 0,5;
-//   zb   — сдвиг дохода, чтобы средний доход взрослых совпадал со средним по стране (ВВП ППС × 0,55).
+//   zb   — сдвиг z-оценки дохода, чтобы личный доход был центрирован (процентили «беднее/богаче» честные);
+//   ki   — множитель дохода, чтобы средний доход взрослых совпадал со средним по стране (ВВП ППС × 0,55).
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -13,6 +15,7 @@ const { Worker, isMainThread, parentPort, workerData } = require('worker_threads
 const { loadEngine } = require('./load-engine');
 
 const CAL_FILE = path.join(__dirname, '..', 'data', 'cal.json');
+const REPORT_FILE = path.join(__dirname, 'calibration-report.txt');
 
 // Одна страна, один пол: средний возраст смерти, средний сдвиг z и средний доход взрослых.
 function run(E, c, sex, n) {
@@ -48,16 +51,18 @@ if (!isMainThread) {
 const args = process.argv.slice(2);
 const opt = k => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : null; };
 const CHECK = args.includes('--check');
-const ITER = +(opt('--iter') || (CHECK ? 1 : 4));
-const N = +(opt('--n') || 3000);
+// Размер выборки растёт от итерации к итерации; последний прогон только измеряет итог (поправки уже не меняет).
+const N = +(opt('--n') || 30000);
+const ITER = +(opt('--iter') || 5);
+const SCHEDULE = CHECK ? [N] : [...Array.from({ length: ITER }, (_, i) => Math.round(Math.min(N, 2000 * 2 ** i))), N];
 const THREADS = Math.max(1, Math.min(+(opt('--threads') || os.cpus().length), 16));
 
 const E0 = loadEngine();
 const only = opt('--only') ? opt('--only').split(',') : null;
 const codes = E0.COUNTRIES.map(c => c.code).filter(k => !only || only.includes(k));
 const CAL = JSON.parse(JSON.stringify(E0.getCal()));
-for (const c of E0.COUNTRIES) if (!CAL[c.code]) CAL[c.code] = { m: 1, f: 1, zb: 0 };
-if (!CHECK && !only) for (const k of codes) CAL[k] = { m: 1, f: 1, zb: CAL[k].zb || 0 };
+for (const c of E0.COUNTRIES) CAL[c.code] = Object.assign({ m: 1, f: 1, zb: 0, ki: 1 }, CAL[c.code]);
+if (args.includes('--reset')) for (const k of codes) CAL[k] = { m: 1, f: 1, zb: 0, ki: 1 };
 
 function simulate(n) {
   // Крупные страны вперемешку с мелкими, чтобы потоки были загружены равномерно.
@@ -72,18 +77,20 @@ function simulate(n) {
 (async () => {
   const t0 = Date.now();
   let res;
-  for (let it = 0; it < ITER; it++) {
-    const last = it === ITER - 1;
-    res = await simulate(last ? N : Math.round(N / 2));
-    if (!CHECK) for (const k of codes) {
+  for (let it = 0; it < SCHEDULE.length; it++) {
+    const last = it === SCHEDULE.length - 1;
+    res = await simulate(SCHEDULE[it]);
+    if (!last) for (const k of codes) {
       const c = E0.BY[k], r = res[k];
       for (const sex of ['m', 'f']) {
         const target = (sex === 'm' ? c.leM : c.leF) - 0.5;
         CAL[k][sex] *= Math.exp(0.088 * (r[sex].mean - target) * 0.9);
       }
-      if (!last) CAL[k].zb = (r.m.zb + r.f.zb) / 2;
+      CAL[k].zb = (r.m.zb + r.f.zb) / 2;
+      const ratio = ((r.m.inc + r.f.inc) / 2) / (c.gdp * 0.55 / 12);
+      if (ratio > 0 && it > 0) CAL[k].ki /= ratio; // доход подгоняется после того, как zb устоялся
     }
-    console.log(`Итерация ${it + 1}/${ITER} готова (${Math.round((Date.now() - t0) / 1000)} с)`);
+    console.log(`${last ? 'Проверка' : 'Итерация ' + (it + 1) + '/' + (SCHEDULE.length - 1)}: ${SCHEDULE[it]} жизней на пол (${Math.round((Date.now() - t0) / 1000)} с)`);
   }
 
   // Отчёт: отклонение возраста смерти от LE − 0,5 и отношение дохода к ВВП ППС × 0,55.
@@ -99,12 +106,16 @@ function simulate(n) {
   }
   console.log('\nСтрана: средний возраст смерти / цель (LE − 0,5), средний доход взрослых / (ВВП ППС × 0,55)');
   console.log(rows.join('\n'));
-  console.log(`\nМаксимальное отклонение возраста смерти: ${worstAge.toFixed(2)} года (шум выборки при n=${N} ≈ ±${(2 * 20 / Math.sqrt(N)).toFixed(2)})`);
+  const sd = 25; // типичное стандартное отклонение возраста смерти
+  console.log(`\nМаксимальное отклонение возраста смерти: ${worstAge.toFixed(2)} года (шум выборки при n=${N}: 1σ ≈ ${(sd / Math.sqrt(N)).toFixed(2)}, у худшей из ${codes.length * 2} групп ожидается ≈ ${(3 * sd / Math.sqrt(N)).toFixed(2)})`);
   console.log(`Максимальное отклонение дохода: ${(worstInc * 100).toFixed(1)}%`);
+  if (!only) fs.writeFileSync(REPORT_FILE, `Отчёт калибровки ${new Date().toISOString().slice(0, 10)}, ${N} жизней на пол\n` +
+    'Страна: средний возраст смерти / цель (LE − 0,5), средний доход взрослых / (ВВП ППС × 0,55)\n' + rows.join('\n') +
+    `\n\nМаксимальное отклонение возраста смерти: ${worstAge.toFixed(2)} года\nМаксимальное отклонение дохода: ${(worstInc * 100).toFixed(1)}%\n`);
 
   if (!CHECK) {
     const out = {};
-    for (const k in CAL) out[k] = { m: +CAL[k].m.toFixed(3), f: +CAL[k].f.toFixed(3), zb: +CAL[k].zb.toFixed(3) };
+    for (const k in CAL) if (E0.BY[k]) out[k] = { m: +CAL[k].m.toFixed(3), f: +CAL[k].f.toFixed(3), zb: +CAL[k].zb.toFixed(3), ki: +CAL[k].ki.toFixed(3) };
     fs.writeFileSync(CAL_FILE, JSON.stringify(out) + '\n');
     console.log('Поправки записаны в data/cal.json');
   }
