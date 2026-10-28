@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="css/style.css">
+<script>try{var t=JSON.parse(localStorage.getItem('lr.theme')||'""');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -83,11 +84,18 @@
         <select id="realCountry"><option value="">Не указывать</option></select>
         <p>В конце эта жизнь будет сравнена с вашей страной.</p>
       </div>
+      <div class="field">
+        <span class="lbl">Оформление</span>
+        <div class="seg" id="segTheme">
+          <button type="button" aria-pressed="true" data-v="auto">Как в системе</button>
+          <button type="button" aria-pressed="false" data-v="light">Светлое</button>
+          <button type="button" aria-pressed="false" data-v="dark">Тёмное</button>
+        </div>
+      </div>
       <label class="check"><input type="checkbox" id="soft"> <span>Убрать пугающие подробности: насильственные причины смерти будут названы обобщённо, а тексты ИИ — без упоминаний смерти и насилия</span></label>
       <button class="btn-born" id="btnBorn" type="button">Родиться</button>
       <p class="warn" id="loadErr" hidden>Не удалось загрузить данные стран. Откройте игру через локальный сервер (например, <span class="mono">python3 -m http.server</span> в папке игры), а не двойным щелчком по файлу.</p>
       <p class="warn">Смерть, болезни и бедность здесь случаются так же часто, как в реальной статистике. Сцены не показываются, а рядом всегда указано, где найти помощь.</p>
-      <div class="links"><button class="btn ghost" type="button" id="btnMem">Мои мемориалы <span class="mono" id="memCount"></span></button></div>
     </div>
   </div>
 </section>
@@ -113,6 +121,7 @@
         <button class="iconbtn" type="button" id="btnQuit">В меню</button>
       </div>
     </div>
+    <p class="kbd-hint"><kbd>Пробел</kbd> пауза · <kbd>1</kbd>–<kbd>6</kbd> скорость · <kbd>←</kbd> <kbd>→</kbd> медленнее/быстрее · <kbd>A</kbd> авто · в окне выбора цифра — вариант</p>
     <div class="thread-box">
       <div class="marks" id="marks" aria-label="Ключевые события жизни"></div>
       <div class="thread" id="thread"></div>
@@ -127,7 +136,11 @@
         <div class="pt-wrap" id="ptWrap"></div>
         <div class="stage-cap"><div class="stage-name" id="stageName"></div><div class="stage-sub" id="stageSub"></div></div>
       </div>
-      <div class="sect-h">Жизнь</div>
+      <div class="feed-h"><div class="sect-h">Жизнь</div>
+        <div class="seg seg-sm" id="segFeed" role="group" aria-label="Что показывать в ленте">
+          <button type="button" aria-pressed="true" data-v="all">Всё</button>
+          <button type="button" aria-pressed="false" data-v="imp">Главное</button>
+        </div></div>
       <ol class="feed" id="feed" reversed></ol>
     </div>
     <div class="side">
@@ -170,18 +183,6 @@
 
 <section id="scrEnd" hidden>
   <div class="end" id="endBox"></div>
-</section>
-
-<section id="scrMem" hidden>
-  <div class="end">
-    <div class="eyebrow">Хранятся только в этом браузере</div>
-    <h1>Мои мемориалы</h1>
-    <div class="mem-list" id="memList"></div>
-    <div class="row" style="justify-content:flex-start">
-      <button class="btn primary" type="button" id="memBack">На главную</button>
-      <button class="btn ghost" type="button" id="memClear">Стереть все записи</button>
-    </div>
-  </div>
 </section>
 
 </div>

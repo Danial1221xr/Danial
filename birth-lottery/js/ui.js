@@ -1,8 +1,9 @@
-/* Интерфейс: экраны «Старт», «Жизнь», «Конец», «Мемориалы», модальные окна решений и пауз. */
+/* Интерфейс: экраны «Старт», «Жизнь», «Конец», модальные окна решений и пауз, горячие клавиши. */
 (async function(){
 const E=window.LR.engine;
 const {COUNTRIES,BY,Life,simulateFull,avgLE,avgIncome,yrs,plural,money,survTo}=E;
-const $=s=>document.querySelector(s);
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const REDUCE=()=>!!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
 async function loadJSON(p){const r=await fetch(p);if(!r.ok)throw new Error(p+": "+r.status);return r.json()}
 try{
   const [cs,names,cal]=await Promise.all([loadJSON("data/countries.json"),loadJSON("data/names.json"),loadJSON("data/cal.json")]);
@@ -18,11 +19,16 @@ const esc=s=>String(s).replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 const cap=s=>s[0].toUpperCase()+s.slice(1);
 const HELP='Если вам сейчас тяжело, поговорите с близкими или найдите бесплатную линию поддержки на <a href="https://findahelpline.com" target="_blank" rel="noopener">findahelpline.com</a>. При угрозе жизни звоните 112.';
 
-const S={mode:store.get('lr.mode','births'),dur:store.get('lr.dur','30'),real:store.get('lr.real',''),soft:store.get('lr.soft',false)};
-const G={L:null,nbs:[],running:false,speed:1,acc:0,yearDur:25,queue:[],modal:false,last:0,auto:false,quitArm:false,notes:[]};
+const S={mode:store.get('lr.mode','births'),dur:store.get('lr.dur','30'),real:store.get('lr.real',''),soft:store.get('lr.soft',false),theme:store.get('lr.theme','auto'),feed:store.get('lr.feed','all')};
+const SPEEDS=[1,2,4,6,8,16];
+const G={L:null,nbs:[],running:false,speed:SPEEDS.includes(+store.get('lr.speed',1))?+store.get('lr.speed',1):1,acc:0,yearDur:25,queue:[],modal:false,last:0,auto:false,quitArm:false,notes:[]};
 
 /* ---------- screens ---------- */
-function show(id){for(const s of ['scrStart','scrLife','scrEnd','scrMem'])$('#'+s).hidden=s!==id;window.scrollTo(0,0);if(G.map){if(id==='scrStart')G.map.resume();else G.map.stop()}}
+/* экран появляется плавно: класс scr-in перезапускает анимацию */
+function show(id){for(const s of ['scrStart','scrLife','scrEnd']){const el=$('#'+s);
+    if(s!==id){el.hidden=true;continue}
+    el.hidden=false;el.classList.remove('scr-in');void el.offsetWidth;el.classList.add('scr-in')}
+  window.scrollTo({top:0,behavior:'instant'});if(G.map){if(id==='scrStart')G.map.resume();else G.map.stop()}}
 
 /* ---------- start ---------- */
 function segInit(sel,val,cb){const el=$(sel);el.querySelectorAll('button[data-v]').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.v===String(val)));b.addEventListener('click',()=>{if(b.disabled)return;el.querySelectorAll('button[data-v]').forEach(x=>x.setAttribute('aria-pressed','false'));b.setAttribute('aria-pressed','true');cb(b.dataset.v)})})}
@@ -35,9 +41,9 @@ const sel=$('#realCountry');[...COUNTRIES].sort((a,b)=>a.name.localeCompare(b.na
 sel.value=S.real;sel.addEventListener('change',()=>{S.real=sel.value;store.set('lr.real',S.real)});
 $('#soft').checked=!!S.soft;$('#soft').addEventListener('change',e=>{S.soft=e.target.checked;store.set('lr.soft',S.soft)});
 $('#btnBorn').addEventListener('click',startLife);
-$('#btnMem').addEventListener('click',()=>{renderMem();show('scrMem')});
-function memCount(){const n=store.get('lr.mem',[]).length;$('#memCount').textContent=n?'· '+n:''}
-memCount();
+/* тема: как в системе, светлая или тёмная; data-theme ставится ещё в <head>, чтобы не мигало */
+function applyTheme(v){if(v==='light'||v==='dark')document.documentElement.dataset.theme=v;else delete document.documentElement.dataset.theme}
+segInit('#segTheme',S.theme,v=>{S.theme=v;store.set('lr.theme',v);applyTheme(v)});applyTheme(S.theme);
 
 /* ---------- карта мира на старте ---------- */
 loadJSON('data/world.json').then(world=>{
@@ -48,24 +54,37 @@ loadJSON('data/world.json').then(world=>{
 }).catch(e=>console.error(e));
 
 /* ---------- life ---------- */
-function startLife(){
+function startLife(country){if(country instanceof Event)country=null;
   // один мир на всех, кто родился в эту секунду: те же кризисы, эпидемии и новости
   G.world=E.makeWorld(new Date().getFullYear(),Math.floor(Math.random()*4294967296));
-  G.L=new Life({mode:S.mode,soft:S.soft,world:G.world});G.notes=[];G.aiMom={};G.aiUpTo=0;G.aiBusy=false;
+  G.L=new Life({mode:S.mode,soft:S.soft,world:G.world,country:country||undefined});G.notes=[];G.aiMom={};G.aiUpTo=0;G.aiBusy=false;
   G.nbs=[0,1,2,3].map(()=>simulateFull(S.mode,S.soft,G.world));
   G.yearDur=(+S.dur*60)/avgLE(G.L.c);G.acc=0;G.queue=[];G.modal=false;G.quitArm=false;G.endShown=false;
-  $('#feed').innerHTML='';phase.fill(undefined);buildThread();G.stageKey=G.portraitKey=null;$('#sceneWrap').innerHTML=$('#ptWrap').innerHTML='';
+  $('#feed').innerHTML='';$('#stats').innerHTML='';G.skillW={};G.genW=0;phase.fill(undefined);buildThread();G.stageKey=G.portraitKey=null;$('#sceneWrap').innerHTML=$('#ptWrap').innerHTML='';
   setFocus('study');
-  const ev=G.L.init();ev.forEach(e=>addFeed(0,e));
+  const ev=G.L.init();ev.forEach((e,i)=>addFeed(0,e,i));
   renderAll();show('scrLife');
   G.running=true;syncSpeed();
   queueYear();G.last=performance.now();requestAnimationFrame(loop);
 }
 /* скорость: «Пауза» — тот же ряд кнопок, что и ×1…×16 */
-function syncSpeed(){const v=G.running?String(G.speed):'0';document.querySelectorAll('#segSpeed button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)))}
-segInit('#segSpeed','1',v=>{if(v==='0')G.running=false;else{G.running=true;G.speed=+v}syncSpeed()});
-$('#btnAuto').addEventListener('click',e=>{G.auto=!G.auto;e.currentTarget.setAttribute('aria-pressed',String(G.auto))});
-$('#btnQuit').addEventListener('click',e=>{if(!G.quitArm){G.quitArm=true;e.currentTarget.textContent='Точно выйти?';setTimeout(()=>{G.quitArm=false;$('#btnQuit').textContent='В меню'},3000);return}G.L=null;G.running=false;closeSheet();memCount();show('scrStart')});
+function syncSpeed(){const v=G.running?String(G.speed):'0';document.querySelectorAll('#segSpeed button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)));$('.topbar').classList.toggle('paused',!G.running)}
+function setSpeed(v){v=+v;if(!v)G.running=false;else{G.running=true;G.speed=v;store.set('lr.speed',v)}syncSpeed()}
+segInit('#segSpeed',String(G.speed),setSpeed);
+function toggleAuto(){G.auto=!G.auto;$('#btnAuto').setAttribute('aria-pressed',String(G.auto))}
+$('#btnAuto').addEventListener('click',toggleAuto);
+/* горячие клавиши: пробел — пауза, 1–6 — скорость, ←/→ — медленнее/быстрее, A — авто; в окне выбора цифры выбирают вариант */
+document.addEventListener('keydown',e=>{if(e.ctrlKey||e.metaKey||e.altKey||e.repeat)return;
+  const tg=e.target;if(tg&&/^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName))return;
+  const n=/^Digit([1-9])$/.exec(e.code)||/^Numpad([1-9])$/.exec(e.code);
+  if(G.modal){if(n){const b=$$('#sheet.open .opt, #sheet.open .chip')[+n[1]-1];if(b){e.preventDefault();b.click()}}return}
+  if($('#scrLife').hidden||!G.L||!G.L.alive)return;
+  if(e.code==='Space'){e.preventDefault();setSpeed(G.running?0:G.speed)}
+  else if(n&&+n[1]<=SPEEDS.length){e.preventDefault();setSpeed(SPEEDS[+n[1]-1])}
+  else if(e.code==='ArrowRight'||e.code==='ArrowLeft'){e.preventDefault();const i=SPEEDS.indexOf(G.speed)+(e.code==='ArrowRight'?1:-1);setSpeed(SPEEDS[Math.max(0,Math.min(SPEEDS.length-1,i))])}
+  else if(e.code==='KeyA'){e.preventDefault();toggleAuto()}});
+segInit('#segFeed',S.feed,v=>{S.feed=v;store.set('lr.feed',v);$('#feed').classList.toggle('imp',v==='imp')});$('#feed').classList.toggle('imp',S.feed==='imp');
+$('#btnQuit').addEventListener('click',e=>{if(!G.quitArm){G.quitArm=true;e.currentTarget.textContent='Точно выйти?';setTimeout(()=>{G.quitArm=false;$('#btnQuit').textContent='В меню'},3000);return}G.L=null;G.running=false;closeSheet();show('scrStart')});
 segInit('#segFocus','study',v=>setFocus(v));
 const FOCUS_HINT={health:'Меньше риск умереть в этом году, медленнее растёт доход.',study:'Помогает дольше учиться и расти на работе.',family:'Больше шансов встретить человека и завести детей.',money:'Доход растёт быстрее, но здоровье страдает.'};
 function setFocus(v){if(G.L)G.L.focus=v;document.querySelectorAll('#segFocus button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)));updFocusHint()}
@@ -77,9 +96,9 @@ function loop(ts){if(!G.L)return;const dt=Math.min(0.25,(ts-G.last)/1000);G.last
   if(G.L&&G.L.alive)requestAnimationFrame(loop)}
 
 function advanceYear(){const L=G.L,x=L.age;const m=G.aiMom[x];if(m&&m.events.length)L.aiCover.add(x);
-  const ev=L.endYear();ev.forEach(e=>addFeed(x,e));
+  const ev=L.endYear();ev.forEach((e,i)=>addFeed(x,e,i));
   // события года от ИИ (если успели прийти): эффекты — только метки, силу задаёт движок
-  if(m&&L.alive)for(const e of m.events){L.applyTags(e.tags);addFeed(x,{k:'info',t:e.text,ai:true})}
+  if(m&&L.alive)for(const e of m.events){L.applyTags(e.tags);addFeed(x,{k:'info',t:e.text,ai:true},ev.length)}
   if(!L.alive){renderAll();G.running=false;setTimeout(()=>{if(G.L===L)endLife()},1600);return}
   renderAll();queueYear()}
 const PAUSES=[5,15,30,50,70];
@@ -92,8 +111,9 @@ function queueYear(){const L=G.L;const m=G.aiMom[L.age];if(m&&m.choice)L.aiChoic
 
 function decHtml(L,d){return `<div class="eyebrow">${yrs(L.age)} · ${esc(d.stage||'решение')}</div><h2 id="sheetTitle">${esc(d.title)}</h2><p>${esc(d.text)}</p><div class="opts">${d.opts.map((o,i)=>`<button class="opt" type="button" data-i="${i}"><b>${esc(o.label)}</b>${o.hint?`<span>${esc(o.hint)}</span>`:''}</button>`).join('')}</div>${d.src==='ai'?'<p class="ai-note">Текст развилки написал ИИ, шансы посчитала игра.</p>':''}`}
 function showDec(L,d){const card=$('#sheetCard');card.innerHTML=decHtml(L,d);
-  card.querySelectorAll('.opt').forEach(b=>b.addEventListener('click',()=>{const i=+b.dataset.i;const r=L.resolve(d,i);addFeed(L.age,{k:'choice',t:`${d.title}: ${r}`});closeSheet();renderAll();nextSheet()}));
-  const fb=card.querySelector('button');if(fb)fb.focus()}
+  let picked=false;
+  card.querySelectorAll('.opt').forEach((b,i)=>{if(i<9)b.insertAdjacentHTML('afterbegin',`<kbd class="kn" aria-hidden="true">${i+1}</kbd>`);b.addEventListener('click',()=>{if(picked)return;picked=true;const i=+b.dataset.i;const r=L.resolve(d,i);addFeed(L.age,{k:'choice',t:`${d.title}: ${r}`});closeSheet();renderAll();nextSheet()})});
+  const fb=card.querySelector('button');if(fb)fb.focus({preventScroll:true})}
 /* ИИ пишет обычную жизнь заранее, на несколько лет вперёд: на высокой скорости — большими кусками */
 function aiPrefetch(L){const ai=window.LR.ai;if(!ai||!ai.available()||G.aiBusy||G.L!==L||!L.alive)return;
   if(G.aiUpTo>=L.age+2)return;
@@ -114,7 +134,7 @@ function nextSheet(){if(G.modal||!G.queue.length)return;const it=G.queue.shift()
   else{const q=pauseQ(L);card.innerHTML=`<div class="eyebrow">Пауза · ${yrs(L.age)}</div><h2 id="sheetTitle">Время остановилось</h2><p>${esc(q)}</p><label for="pauseTxt" class="muted" style="font-size:13px">Одна строчка, если хотите</label><textarea id="pauseTxt" maxlength="280"></textarea><div class="row"><button class="btn ghost" type="button" id="pSkip">Пропустить</button><button class="btn primary" type="button" id="pGo">Дальше</button></div>`;
     const fin=save=>{const v=$('#pauseTxt').value.trim();if(save&&v){G.notes.push({age:L.age,q,a:v});addFeed(L.age,{k:'note',t:`Ваша запись: «${v}»`})}closeSheet();nextSheet()};
     $('#pSkip').addEventListener('click',()=>fin(false));$('#pGo').addEventListener('click',()=>fin(true));setTimeout(()=>{const t=$('#pauseTxt');if(t)t.focus()},50)}
-  $('#sheet').hidden=false}
+  openSheet()}
 
 /* ---------- мечта ---------- */
 const AI_WHO={gemini:'Google (Gemini)',anthropic:'Anthropic (Claude)',deepseek:'DeepSeek'};
@@ -145,7 +165,13 @@ function dreamSheet(L,d,card){const ai=window.LR.ai,useAI=!!(ai&&ai.available())
     done(res,p.src==='ai'?p.short:'')});
   setTimeout(()=>{const t=$('#dreamTxt');if(t)t.focus()},50)}
 
-function closeSheet(){$('#sheet').hidden=true;G.modal=false}
+/* окно выбора выезжает и гаснет; если следующее окно открывается сразу, меняется только содержимое */
+let sheetT=0;
+function openSheet(){const s=$('#sheet'),c=$('#sheetCard');clearTimeout(sheetT);
+  if(s.hidden){s.hidden=false;void s.offsetWidth}
+  s.classList.add('open');c.classList.remove('swap');void c.offsetWidth;c.classList.add('swap')}
+function closeSheet(){const s=$('#sheet');G.modal=false;s.classList.remove('open');clearTimeout(sheetT);
+  sheetT=setTimeout(()=>{if(!s.classList.contains('open'))s.hidden=true},REDUCE()?0:240)}
 function pauseQ(L){const c=L.c;
   if(L.age===5)return 'Этому ребёнку пять лет. Что он уже знает о мире вокруг? А что вы помните о своих пяти годах?';
   if(L.age===15)return `Пятнадцать лет. ${L.eduDone?`За плечами ${L.eduDone} ${plural(L.eduDone,['класс','класса','классов'])}`:'Школы в этой жизни не было'}, сейчас: ${L.status()}. Что в этом возрасте определило вашу собственную дорогу?`;
@@ -153,7 +179,8 @@ function pauseQ(L){const c=L.c;
   if(L.age===50)return 'Полвека. Что бы вы сказали этому человеку, если бы могли с ним поговорить?';
   const p=Math.round(survTo(L.home,L.sex,70)*100);return `До семидесяти лет ${L.home.inName} доживают примерно ${p}% ${L.sex==='m'?'мужчин':'женщин'}. Что для вас значит долгая жизнь?`}
 
-function addFeed(age,e){const li=document.createElement('li');li.className=(e.k||'info')+(e.ai?' ai':'');if(e.ai)li.title='Событие написал ИИ';
+function addFeed(age,e,i){const li=document.createElement('li');li.className=(e.k||'info')+(e.ai?' ai':'');if(e.ai)li.title='Событие написал ИИ';
+  if(i)li.style.animationDelay=Math.min(i,6)*70+'ms';// события одного года появляются по очереди
   li.innerHTML=`<span class="a">${age} ${plural(age,['год','года','лет'])}</span><div><div class="t">${e.k==='world'?'<span class="tag">Мир</span>':''}${esc(e.t)}</div>${e.help?`<div class="help">${HELP}</div>`:''}</div>`;
   const f=$('#feed');f.insertBefore(li,f.firstChild)}
 
@@ -178,7 +205,7 @@ function renderMarks(L){const box=$('#marks');if(box.dataset.n===String(L.marks.
 
 function renderAll(){const L=G.L;if(!L)return;
   $('#lifeName').textContent=`${L.name} · ${L.c.name}${L.migrated?' (родом: '+L.home.name+')':''}`;
-  $('#lifeAge').textContent=yrs(L.age);$('#lifeYear').textContent=String(L.born+L.age);
+  const ag=$('#lifeAge');if(ag.textContent!==yrs(L.age)){ag.textContent=yrs(L.age);pulse(ag)}$('#lifeYear').textContent=String(L.born+L.age);
   const inc=L.income(),p=L.pctl();
   const rows=[['Где',`${L.rural?'Деревня':'Город'}, ${L.c.name}`],['Занятие',cap(L.status())],['Семья',cap(L.family())],
     [L.zp===null||L.homemaker?'Доход семьи':'Доход',`<span class="mono">${money(inc)}</span> в месяц <div class="pct">${p<50?`беднее ${100-p}% людей страны`:`богаче ${p}% людей страны`}</div>`],
@@ -192,22 +219,37 @@ function renderAll(){const L=G.L;if(!L)return;
   $('#nowDl').innerHTML=rows.map(r=>`<dt>${r[0]}</dt><dd>${r[0]==='Доход'||r[0]==='Доход семьи'?r[1]:esc(r[1])}</dd>`).join('');
   renderStats(L);renderGen(L);renderSkills(L);
   renderThread();renderNbs();renderFacts();renderStage(L);updFocusHint()}
-/* показатели 0–100, как в паспорте жизни */
+/* плавность: перезапуск короткой анимации, счёт чисел и рост полосок от прежнего значения */
+function pulse(el,cls='bump'){if(REDUCE())return;el.classList.remove(cls);void el.offsetWidth;el.classList.add(cls)}
+function tweenNum(el,to){const from=parseFloat(el.dataset.v);el.dataset.v=to;cancelAnimationFrame(el._tw);
+  if(isNaN(from)||from===to||REDUCE()){el.textContent=String(to);return}
+  const t0=performance.now(),d=600;
+  const step=ts=>{const k=Math.min(1,(ts-t0)/d),e=1-Math.pow(1-k,3);el.textContent=String(Math.round(from+(to-from)*e));if(k<1)el._tw=requestAnimationFrame(step)};
+  el._tw=requestAnimationFrame(step)}
+function growBars(box){requestAnimationFrame(()=>requestAnimationFrame(()=>box.querySelectorAll('i[data-w]').forEach(i=>{i.style.width=i.dataset.w+'%'})))}
+/* показатели 0–100, как в паспорте жизни; строки создаются один раз, дальше меняются значения */
 const STAT_LBL=[['health','Здоровье'],['know','Знания'],['happy','Счастье'],['rel','Отношения'],['wealth','Достаток']];
-function renderStats(L){const st=L.stats();
-  $('#stats').innerHTML=STAT_LBL.map(([k,l])=>{const v=st[k];return `<div class="stat st-${k}" title="${l}: ${v} из 100"><span class="sl">${l}</span><span class="bar" role="meter" aria-label="${l}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${v}"><i style="width:${v}%"></i></span><span class="sv mono">${v}</span></div>`}).join('')
-    +`<p class="stat-note">Достаток — место среди людей вашей страны. Среди всех людей мира вы богаче ${st.world}%.</p>`}
+function renderStats(L){const st=L.stats(),box=$('#stats');
+  if(!box.firstChild)box.innerHTML=STAT_LBL.map(([k,l])=>`<div class="stat st-${k}"><span class="sl">${l}</span><span class="bar" role="meter" aria-label="${l}" aria-valuemin="0" aria-valuemax="100"><i></i></span><span class="sv mono"></span></div>`).join('')+'<p class="stat-note"></p>';
+  STAT_LBL.forEach(([k,l],i)=>{const row=box.children[i],v=st[k],sv=row.querySelector('.sv'),old=parseFloat(sv.dataset.v);
+    row.title=`${l}: ${v} из 100`;row.querySelector('.bar').setAttribute('aria-valuenow',v);row.querySelector('i').style.width=v+'%';tweenNum(sv,v);
+    // заметное изменение за год — короткая подсказка «+5» / «−4»
+    if(!isNaN(old)&&Math.abs(v-old)>=3&&!REDUCE()){const d=document.createElement('b');d.className='delta '+(v>old?'up':'down');d.setAttribute('aria-hidden','true');d.textContent=(v>old?'+':'−')+Math.abs(v-old);row.appendChild(d);setTimeout(()=>d.remove(),1400)}});
+  box.lastChild.textContent=`Достаток — место среди людей вашей страны. Среди всех людей мира вы богаче ${st.world}%.`}
 /* навыки и увлечения */
 function renderSkills(L){const S=E.SKILLS,top=Object.entries(L.skills).filter(([,v])=>v>=1).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const lvl=v=>v>=85?'мастер':v>=60?'умеет хорошо':v>=30?'уверенно':'новичок';
   $('#skills').innerHTML=(L.hobbies.length?`<div class="chips">${L.hobbies.map(k=>`<span class="chip static">${esc(S[k].hobby)}</span>`).join('')}</div>`:`<p class="muted" style="margin:0;font-size:13px">${L.age<5?'Пока вы только познаёте мир.':'Увлечений пока нет.'}</p>`)
-    +(top.length?`<div class="stats" style="margin:10px 0 0">${top.map(([k,v])=>`<div class="stat st-skill" title="${esc(S[k].name)}: ${Math.round(v)} из 100 — ${lvl(v)}"><span class="sl">${esc(S[k].name)}</span><span class="bar"><i style="width:${v.toFixed(0)}%"></i></span><span class="sv mono">${Math.round(v)}</span></div>`).join('')}</div>`:'')}
+    +(top.length?`<div class="stats" style="margin:10px 0 0">${top.map(([k,v])=>`<div class="stat st-skill" title="${esc(S[k].name)}: ${Math.round(v)} из 100 — ${lvl(v)}"><span class="sl">${esc(S[k].name)}</span><span class="bar"><i style="width:${G.skillW[k]||0}%" data-w="${v.toFixed(0)}"></i></span><span class="sv mono">${Math.round(v)}</span></div>`).join('')}</div>`:'');
+  for(const [k,v] of top)G.skillW[k]=v.toFixed(0);
+  growBars($('#skills'))}
 /* поколение: все дети мира, родившиеся в один год с вами */
 function renderGen(L){const born=E.worldBirths()/1000,a=L.age,alive=E.cohortSurvival(a+(L.alive?0:1));
   const f=v=>v>=10?Math.round(v):v.toFixed(1).replace('.',',');
   $('#gen').innerHTML=`<p>В ${L.born} году в мире родилось около <b class="mono">${f(born)} млн</b> детей. ${a?`До ${yrs(a)} дожили примерно <b class="mono">${Math.round(alive*100)}%</b> — около ${f(born*alive)} млн человек.`:'Все они начинают жизнь в одну и ту же секунду истории, но в очень разных местах.'}</p>
-    <div class="genbar" aria-hidden="true"><i style="width:${(alive*100).toFixed(1)}%"></i></div>
-    <p class="muted" style="font-size:13px;margin:6px 0 0">${L.home.inName[0].toUpperCase()+L.home.inName.slice(1)} до этого возраста доживают ${Math.round(survTo(L.home,L.sex,a)*100)}% ${L.sex==='m'?'мальчиков':'девочек'}.</p>`}
+    <div class="genbar" aria-hidden="true"><i style="width:${G.genW}%" data-w="${(alive*100).toFixed(1)}"></i></div>
+    <p class="muted" style="font-size:13px;margin:6px 0 0">${L.home.inName[0].toUpperCase()+L.home.inName.slice(1)} до этого возраста доживают ${Math.round(survTo(L.home,L.sex,a)*100)}% ${L.sex==='m'?'мальчиков':'девочек'}.</p>`;
+  G.genW=(alive*100).toFixed(1);growBars($('#gen'))}
 /* портрет и фон этапа жизни; смена — плавным наложением слоёв */
 function swapLayer(box,html){const old=[...box.children];const el=document.createElement('div');el.className='layer';el.innerHTML=html;box.appendChild(el);
   requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('on')));old.forEach(o=>{o.classList.remove('on');setTimeout(()=>o.remove(),700)})}
@@ -216,7 +258,7 @@ function renderStage(L){const P=LR.portrait,st=L.phase();
   const key=st+(st==='work'&&L.rural?'-r':'');
   if(G.stageKey!==key){G.stageKey=key;swapLayer($('#sceneWrap'),P.scene(st,L.rural))}
   const pk=L.age+'|'+L.alive;if(G.portraitKey!==pk){G.portraitKey=pk;swapLayer($('#ptWrap'),P.svg(L))}
-  $('#stageName').textContent=STAGE_NAME[st];$('#stageSub').textContent=cap(L.status());$('#stagebox').dataset.stage=st}
+  const sn=$('#stageName');if(sn.textContent!==STAGE_NAME[st]){sn.textContent=STAGE_NAME[st];pulse(sn,'fade')}$('#stageSub').textContent=cap(L.status());$('#stagebox').dataset.stage=st}
 
 function nbAt(n,age){const s=n.snaps;const i=Math.min(age,s.length-1);return s[i]}
 function renderNbs(){const L=G.L;$('#nbs').innerHTML=G.nbs.map(n=>{const s=nbAt(n,L.age);const dead=!s.alive;
@@ -276,26 +318,28 @@ function endLife(){const L=G.L;if(!L||G.endShown)return;G.endShown=true;closeShe
     <div class="card"><div class="sect-h">Доход за жизнь</div><p class="muted" style="margin:0 0 8px;font-size:13px">В месяц, по паритету покупательной способности. До первой работы — доход семьи на человека.</p><div id="incChart"></div></div>
     <div class="card"><div class="sect-h">Линии жизни: вы и родившиеся в ту же секунду</div><div id="lifeLines"></div><ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px">${nbHtml}</ul></div>
     ${cmp}
-    <div class="card" style="display:flex;flex-direction:column;gap:10px"><label for="epi" class="sect-h" style="margin:0">Несколько слов этому человеку</label><textarea id="epi" maxlength="400"></textarea><div class="row" style="justify-content:flex-start"><button class="btn primary" type="button" id="saveMem">Сохранить в мемориалы</button><span id="saved" class="muted" style="align-self:center"></span></div></div>
-    <div class="row" style="justify-content:flex-start"><button class="btn-born" type="button" id="again" style="width:auto">Родиться снова</button><button class="btn" type="button" id="toMem">Мои мемориалы</button><button class="btn ghost" type="button" id="toStart">На главную</button></div>`;
+    <div class="row end-acts"><button class="btn-born" type="button" id="again">Родиться снова</button><button class="btn" type="button" id="againHere">Ещё раз ${esc(L.home.inName)}</button><button class="btn" type="button" id="copySum">Скопировать итог</button><button class="btn ghost" type="button" id="toStart">На главную</button><span class="muted copied" id="copied" role="status"></span></div>`;
   if(dO&&window.LR.ai&&LR.ai.available()){
     const hl=L.history.filter(h=>h.id!=='dream').slice(-6).map(h=>`${h.age} лет: ${h.label}`);
     if(L.kids.length)hl.push(`детей: ${L.kids.length}`);if(L.migrated)hl.push(`переезд: ${L.c.name}`);
     LR.ai.writeEpilogue(L,dO.key,hl).then(r=>{if(r&&r.text&&G.L===L&&$('#dreamEpi')){$('#dreamEpi').textContent=r.text;$('#dreamEpiNote').hidden=false}})}
-  $('#saveMem').addEventListener('click',()=>{if(G.savedId)return;const list=store.get('lr.mem',[]);const id=Date.now();G.savedId=id;
-    list.unshift({id,name:L.name,home:L.home.name,now:L.c.name,born:L.born,age:L.age,cause:L.cause,job:L.job,kids:L.kids.length,dream:L.dream?L.dream.title:null,dreamRes:dO?dO.title:null,epi:$('#epi').value.trim(),notes:G.notes});store.set('lr.mem',list.slice(0,200));$('#saved').textContent='Сохранено';$('#saveMem').disabled=true;memCount()});
-  G.savedId=null;
-  $('#again').addEventListener('click',startLife);$('#toMem').addEventListener('click',()=>{renderMem();show('scrMem')});$('#toStart').addEventListener('click',()=>{memCount();show('scrStart')});
+  $('#again').addEventListener('click',startLife);$('#againHere').addEventListener('click',()=>startLife(L.home));$('#toStart').addEventListener('click',()=>show('scrStart'));
+  $('#copySum').addEventListener('click',()=>copyText(summaryText(L,dO)).then(ok=>{const c=$('#copied');c.textContent=ok?'Скопировано':'Не получилось скопировать';pulse(c,'fade')}));
   show('scrEnd');
   // графики строятся после показа экрана: им нужна настоящая ширина контейнера
   LR.charts.income($('#incChart'),L.incomeLog);
   LR.charts.lifeLines($('#lifeLines'),[{name:L.name,sub:`вы · ${L.home.name} · ${yrs(L.age)}`,phases:L.incomeLog.map(x=>x.ph).filter(p=>p!=='dead'),age:L.age,you:true},
     ...G.nbs.map(n=>({name:n.L.name,sub:`${n.L.home.name} · ${yrs(n.L.age)}`,phases:n.snaps.slice(0,-1).map(x=>x.ph).filter(p=>p!=='dead'),age:n.L.age}))])}
 
-/* ---------- memorials ---------- */
-function renderMem(){const list=store.get('lr.mem',[]);
-  $('#memList').innerHTML=list.length?list.map(m=>`<div class="mem"><h3>${esc(m.name)}</h3><p class="mono muted" style="font-size:13px">${m.born} — ${m.born+m.age} · ${esc(m.home)}${m.now!==m.home?' → '+esc(m.now):''}</p><p>${m.age===0?'Меньше года':cap(yrs(m.age))}. ${esc(cap(m.cause||''))}.${m.job?' Работа: '+esc(m.job)+'.':''}${m.kids?' Детей: '+m.kids+'.':''}${m.dream?' Мечта: '+esc(m.dream)+(m.dreamRes?' — '+esc(m.dreamRes.toLowerCase()):'')+'':''}</p>${m.epi?`<p class="ep">«${esc(m.epi)}»</p>`:''}</div>`).join(''):'<p class="muted">Пока пусто. Проживите жизнь и сохраните её в конце.</p>';
-  $('#memClear').textContent='Стереть все записи';G.clearArm=false}
-$('#memBack').addEventListener('click',()=>{memCount();show('scrStart')});
-$('#memClear').addEventListener('click',e=>{if(!G.clearArm){G.clearArm=true;e.currentTarget.textContent='Нажмите ещё раз, чтобы стереть';return}store.set('lr.mem',[]);renderMem();memCount()});
+/* итог жизни простым текстом — чтобы поделиться */
+function summaryText(L,dO){const he=L.sex==='m';
+  const lines=[`${L.name}, ${L.home.name}${L.migrated?' → '+L.c.name:''}, ${L.born}–${L.born+L.age}`,
+    `${he?'Прожил':'Прожила'} ${L.age===0?'меньше года':yrs(L.age)}. Причина: ${L.cause}.`,
+    `Образование: ${L.degree?'высшее':L.eduDone?L.eduDone+' '+plural(L.eduDone,['класс','класса','классов']):'нет'}. Работа: ${L.job||'—'}. Детей: ${L.kids.length}.`];
+  if(dO)lines.push(`Мечта в 10 лет: ${L.dream.title} — ${dO.title.toLowerCase().replace(/\.$/,'')}.`);
+  lines.push('','Лотерея рождения — симуляция жизни по реальной статистике 172 стран.');
+  return lines.join('\n')}
+async function copyText(t){try{await navigator.clipboard.writeText(t);return true}catch(e){
+  const ta=document.createElement('textarea');ta.value=t;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();
+  let ok=false;try{ok=document.execCommand('copy')}catch(e2){}ta.remove();return ok}}
 })();
