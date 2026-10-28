@@ -103,6 +103,8 @@ npx wrangler deploy
 
 Wrangler напечатает адрес вида `https://birth-lottery-ai.<ваш-поддомен>.workers.dev`. Проверьте его: откройте `…workers.dev/health` — должно быть `{"ok":true,"provider":"gemini",…,"configured":true}`.
 
+Чтобы проверить, что ИИ действительно отвечает, откройте `…workers.dev/health?test=1` или нажмите на старте игры «Проверить ИИ». Если что-то не так, там будет написана причина: неверный ключ, закончился бесплатный лимит, модель отключена, игра открыта с адреса, которого нет в `ALLOWED_ORIGINS`. Подробный лог запросов: `npx wrangler tail` (в PowerShell — `npx.cmd wrangler tail`).
+
 ### 4. Вписать адрес в игру
 
 В файле `js/config.js`:

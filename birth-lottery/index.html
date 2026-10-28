@@ -6,7 +6,7 @@
 <title>Лотерея рождения</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@500;700&family=Nunito:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="css/style.css">
 <script>try{var t=JSON.parse(localStorage.getItem('lr.theme')||'""');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
 </head>
@@ -93,6 +93,7 @@
         </div>
       </div>
       <label class="check"><input type="checkbox" id="soft"> <span>Убрать пугающие подробности: насильственные причины смерти будут названы обобщённо, а тексты ИИ — без упоминаний смерти и насилия</span></label>
+      <div class="ai-status" id="aiStatus" hidden><span class="ai-dot" id="aiDot"></span><span id="aiText">ИИ: проверяем…</span><button class="btn ghost" type="button" id="aiCheck">Проверить ИИ</button><p id="aiMore" hidden></p></div>
       <button class="btn-born" id="btnBorn" type="button">Родиться</button>
       <p class="warn" id="loadErr" hidden>Не удалось загрузить данные стран. Откройте игру через локальный сервер (например, <span class="mono">python3 -m http.server</span> в папке игры), а не двойным щелчком по файлу.</p>
       <p class="warn">Смерть, болезни и бедность здесь случаются так же часто, как в реальной статистике. Сцены не показываются, а рядом всегда указано, где найти помощь.</p>

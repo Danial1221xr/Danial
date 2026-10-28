@@ -19,7 +19,7 @@ function start(box,world,countries,onTick){
   const cv=box.querySelector('canvas'),cx=cv.getContext('2d');
   const pool=countries.map(c=>[c,c.births]),sum=pool.reduce((s,p)=>s+p[1],0);
   const pickC=()=>{let r=Math.random()*sum;for(const [c,w] of pool){r-=w;if(r<=0)return c}return pool[0][0]};
-  const dots=[];let col={a:'#B9620F',m:'#5A6573'},colT=-1e9,lastB=0,lastD=0,T0=performance.now(),running=true,recent=[];
+  const dots=[];let col={a:'#2C7487',m:'#5A6577'},colT=-1e9,lastB=0,lastD=0,T0=performance.now(),running=true,recent=[];
   // при неподвижной карте после смены размера холст нужно перерисовать
   const size=()=>{const r=cv.getBoundingClientRect(),d=window.devicePixelRatio||1;cv.width=Math.max(1,r.width*d);cv.height=Math.max(1,r.height*d);if(reduce()&&dots.length)draw(0)};
   size();const ro=window.ResizeObserver?new ResizeObserver(size):null;if(ro)ro.observe(cv);

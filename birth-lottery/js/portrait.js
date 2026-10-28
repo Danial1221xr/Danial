@@ -46,39 +46,71 @@ function svg(L,opt={}){
   }
   const ey=hy+2,es=6.5*t.eyes,eyeR=baby?2.6:2.1;
   const eyes=dead?`<path d="M${hx-es-3} ${ey} h6 M${hx+es-3} ${ey} h6" stroke="var(--face-ink)" stroke-width="1.6" stroke-linecap="round"/>`
-    :`<circle cx="${hx-es}" cy="${ey}" r="${eyeR}" fill="var(--face-ink)"/><circle cx="${hx+es}" cy="${ey}" r="${eyeR}" fill="var(--face-ink)"/>`;
+    :`<circle cx="${hx-es}" cy="${ey}" r="${eyeR}" fill="var(--face-ink)"/><circle cx="${hx+es}" cy="${ey}" r="${eyeR}" fill="var(--face-ink)"/><circle cx="${hx-es+0.8}" cy="${ey-0.8}" r="0.7" fill="#fff" opacity=".85"/><circle cx="${hx+es+0.8}" cy="${ey-0.8}" r="0.7" fill="#fff" opacity=".85"/>`;
+  const nose=baby?'':`<path d="M${hx} ${ey+3} q-2 4 0.5 5.5" fill="none" stroke="var(--face-ink)" stroke-width="1.1" stroke-linecap="round" opacity=".35"/>`;
+  const ears=`<ellipse cx="${hx-rx+0.5}" cy="${hy+3}" rx="4" ry="5.5" fill="${skin}"/><ellipse cx="${hx+rx-0.5}" cy="${hy+3}" rx="4" ry="5.5" fill="${skin}"/>`;
   const mouth=`<path d="M${hx-5} ${hy+13} q5 ${dead?0:(opt.sad?-2:3)} 10 0" fill="none" stroke="var(--face-ink)" stroke-width="1.6" stroke-linecap="round"/>`;
   const wrinkles=wr>0?`<g stroke="var(--face-ink)" stroke-width="0.9" fill="none" opacity="${(0.15+wr*0.35).toFixed(2)}" stroke-linecap="round"><path d="M${hx-9} ${hy-11} q9 -3 18 0"/><path d="M${hx-es-6} ${ey+5} q2 2 4 1 M${hx+es+2} ${ey+6} q2 -1 4 -1"/>${wr>0.5?`<path d="M${hx-8} ${hy-15} q8 -3 16 0"/>`:''}</g>`:'';
   // борода повторяет линию челюсти и оставляет открытым рот
   const beard=t.beard&&a>=20?`<path d="M${hx-rx+0.5} ${hy+2} Q${hx-rx+2} ${hy+ry} ${hx} ${hy+ry+3} Q${hx+rx-2} ${hy+ry} ${hx+rx-0.5} ${hy+2} Q${hx+rx-6} ${hy+16} ${hx+8} ${hy+17} Q${hx} ${hy+10} ${hx-8} ${hy+17} Q${hx-rx+6} ${hy+16} ${hx-rx+0.5} ${hy+2}Z" fill="${hairCol}" opacity="0.85"/>`:'';
   const glasses=t.glasses&&a>=45?`<g fill="none" stroke="var(--face-ink)" stroke-width="1.4"><circle cx="${hx-es}" cy="${ey}" r="5.5"/><circle cx="${hx+es}" cy="${ey}" r="5.5"/><path d="M${hx-es+5.5} ${ey} h${2*es-11}"/></g>`:'';
-  const cheeks=a<12&&!dead?`<circle cx="${hx-rx*0.6}" cy="${hy+8}" r="3.5" fill="var(--accent)" opacity="0.18"/><circle cx="${hx+rx*0.6}" cy="${hy+8}" r="3.5" fill="var(--accent)" opacity="0.18"/>`:'';
+  const cheeks=!dead?`<circle cx="${hx-rx*0.6}" cy="${hy+8}" r="3.5" fill="var(--blush)" opacity="${a<12?0.4:0.22}"/><circle cx="${hx+rx*0.6}" cy="${hy+8}" r="3.5" fill="var(--blush)" opacity="${a<12?0.4:0.22}"/>`:'';
   const body=baby?`<ellipse cx="60" cy="122" rx="28" ry="22" fill="${cloth}"/>`
-    :`<path d="M${60-(teen?30:34)} 140 Q${60-(teen?28:32)} 100 60 98 Q${60+(teen?28:32)} 100 ${60+(teen?30:34)} 140Z" fill="${cloth}"/><rect x="54" y="${hy+ry-6}" width="12" height="14" rx="4" fill="${skin}"/>`;
+    :`<path d="M${60-(teen?30:34)} 140 Q${60-(teen?28:32)} 100 60 98 Q${60+(teen?28:32)} 100 ${60+(teen?30:34)} 140Z" fill="${cloth}"/><rect x="54" y="${hy+ry-6}" width="12" height="14" rx="4" fill="${skin}"/><path d="M52 ${hy+ry+5} L60 ${hy+ry+13} L68 ${hy+ry+5}" fill="none" stroke="var(--face-ink)" stroke-width="1.2" stroke-linejoin="round" opacity=".18"/>`;
   return `<svg class="portrait${dead?' is-dead':''}" viewBox="0 0 120 140" role="img" aria-label="Портрет: ${L.sex==='m'?'мужчина':'женщина'}, ${a} лет">
     <g class="pg" style="transform:translate(60px,140px) scale(${g.toFixed(3)}) translate(-60px,-140px)">
+      <ellipse cx="60" cy="140" rx="46" ry="8" fill="var(--face-ink)" opacity=".12"/>
       ${body}
-      ${back}
+      ${back}${ears}
       <ellipse cx="${hx}" cy="${hy}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="${skin}"/>
-      ${cheeks}${wrinkles}${beard}${eyes}${mouth}${glasses}${hair}
+      ${cheeks}${wrinkles}${beard}${eyes}${nose}${mouth}${glasses}${hair}
     </g></svg>`;
 }
 
 /* этап жизни для фона и нити */
 function stage(L){if(!L.alive)return 'dead';const a=L.age;if(a<6)return 'child';if(L.inSchool||L.uni||L.college||a<15)return 'school';if(L.retired||a>=65)return 'old';return 'work'}
 
-/* фон этапа: простые сцены из фигур (детство — солнце и холмы, учёба — книги, работа — город или поле, старость — сад) */
+/* фон этапа: тихие пейзажи из слоёв — небо с градиентом, дальние и ближние холмы, облака,
+   в тёмной теме — звёзды и тёплый свет в окнах. Детство — дом и дерево, учёба — школа,
+   работа — город или поле, старость — сад со скамейкой. Цвета — токены --scene-*. */
+let sceneN=0;
 function scene(st,rural){
-  const hills=`<path d="M0 120 Q60 92 130 110 T260 104 T400 112 V160 H0Z" fill="var(--scene-ground)"/>`;
+  const id='sc'+(++sceneN);
+  const sky=`<defs><linearGradient id="${id}s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--scene-sky-top)"/><stop offset="1" style="stop-color:var(--scene-sky)"/></linearGradient>
+    <radialGradient id="${id}h"><stop offset="0" style="stop-color:var(--scene-sun);stop-opacity:.55"/><stop offset="1" style="stop-color:var(--scene-sun);stop-opacity:0"/></radialGradient></defs>
+    <rect width="400" height="160" fill="url(#${id}s)"/>`;
+  const stars=`<g class="stars" fill="var(--scene-star)">${[[30,18],[72,40],[118,14],[160,30],[236,20],[280,44],[322,16],[364,34],[200,52],[96,62],[344,62]].map(([x,y],i)=>`<circle cx="${x}" cy="${y}" r="${i%3?0.9:1.3}" style="animation-delay:${(i*0.7).toFixed(1)}s"/>`).join('')}</g>`;
+  const sun=(x,y,r)=>`<circle cx="${x}" cy="${y}" r="${r*2.6}" fill="url(#${id}h)"/><circle cx="${x}" cy="${y}" r="${r}" fill="var(--scene-sun)"/>`;
+  const cloud=(x,y,k,c)=>`<g transform="translate(${x} ${y}) scale(${k})"><g class="cloud ${c||''}" fill="var(--scene-cloud)" opacity=".8"><ellipse cx="0" cy="0" rx="22" ry="8"/><ellipse cx="-10" cy="-5" rx="11" ry="8"/><ellipse cx="8" cy="-7" rx="13" ry="10"/></g></g>`;
+  const far=`<path d="M0 104 Q50 78 110 92 T230 86 T340 90 T400 84 V160 H0Z" fill="var(--scene-far)"/>`;
+  const mid=`<path d="M0 118 Q70 96 150 110 T290 104 T400 108 V160 H0Z" fill="var(--scene-mid)"/>`;
+  const near=`<path d="M0 132 Q90 118 200 128 T400 124 V160 H0Z" fill="var(--scene-ground)"/>`;
+  const tree=(x,y,k)=>`<g transform="translate(${x} ${y}) scale(${k})"><rect x="-2.5" y="-4" width="5" height="22" rx="2" fill="var(--scene-trunk)"/><circle cx="0" cy="-14" r="15" fill="var(--scene-accent)"/><circle cx="-9" cy="-6" r="10" fill="var(--scene-accent)"/><circle cx="9" cy="-7" r="10" fill="var(--scene-accent)"/></g>`;
+  const pine=(x,y,k)=>`<g transform="translate(${x} ${y}) scale(${k})" fill="var(--scene-accent)"><path d="M0 -30 L12 -8 H-12Z M0 -20 L15 4 H-15Z"/><rect x="-2" y="4" width="4" height="7" fill="var(--scene-trunk)"/></g>`;
+  const win=(x,y,w,h)=>`<rect class="win" x="${x}" y="${y}" width="${w}" height="${h}" rx="1.5" fill="var(--scene-glow)"/>`;
+  const house=(x,y)=>`<g transform="translate(${x} ${y})"><rect x="0" y="0" width="46" height="32" rx="3" fill="var(--scene-build)"/><path d="M-6 2 L23 -20 L52 2Z" fill="var(--scene-roof)"/><rect x="31" y="-16" width="6" height="12" fill="var(--scene-roof)"/>${win(7,9,11,10)}${win(28,9,11,10)}</g>`;
   const S={
-    child:`<circle cx="190" cy="38" r="20" fill="var(--scene-sun)"/>${hills}<g fill="var(--scene-accent)"><rect x="70" y="96" width="16" height="16" rx="3"/><circle cx="110" cy="104" r="8"/></g>`,
-    school:`<circle cx="190" cy="38" r="16" fill="var(--scene-sun)"/>${hills}<g fill="var(--scene-accent)"><rect x="40" y="70" width="70" height="44" rx="2"/><path d="M34 72 L75 50 L116 72Z"/></g><g fill="var(--scene-far)"><rect x="250" y="94" width="10" height="20" rx="2"/><rect x="264" y="98" width="10" height="16" rx="2"/></g>`,
-    work:rural?`<circle cx="190" cy="38" r="18" fill="var(--scene-sun)"/>${hills}<g stroke="var(--scene-accent)" stroke-width="3">${[...Array(9)].map((_,i)=>`<path d="M${40+i*22} 128 v-14"/>`).join('')}</g><path d="M290 100 h40 v16 h-40Z M286 101 L310 84 L334 101Z" fill="var(--scene-far)"/>`
-      :`<circle cx="190" cy="34" r="14" fill="var(--scene-sun)"/><g fill="var(--scene-far)">${[[20,60],[60,40],[100,70],[150,30],[200,55],[250,45],[300,65],[350,50]].map(([x,h])=>`<rect x="${x}" y="${120-h}" width="34" height="${h+40}"/>`).join('')}</g><path d="M0 124 H400 V160 H0Z" fill="var(--scene-ground)"/>`,
-    old:`<circle cx="190" cy="44" r="18" fill="var(--scene-sun)" opacity="0.8"/>${hills}<g fill="var(--scene-accent)"><rect x="60" y="76" width="8" height="40"/><circle cx="64" cy="70" r="22"/></g><path d="M250 104 h60 v4 h-60Z M256 108 v10 M304 108 v10" stroke="var(--scene-far)" stroke-width="4" fill="var(--scene-far)"/>`,
-    dead:`<circle cx="190" cy="40" r="14" fill="var(--scene-sun)" opacity="0.4"/>${hills}`
+    child:`${stars}${sun(196,30,12)}${cloud(90,40,1)}${cloud(250,26,.7,'slow')}${far}${mid}${house(150,92)}${tree(240,116,1)}${tree(262,122,.7)}${near}`,
+    school:`${stars}${sun(168,26,10)}${cloud(70,30,.9)}${cloud(220,46,.6,'slow')}${far}${mid}
+      <g transform="translate(150 78)"><rect x="0" y="0" width="100" height="44" rx="3" fill="var(--scene-build)"/><path d="M-6 2 L50 -18 L106 2Z" fill="var(--scene-roof)"/><circle cx="50" cy="-6" r="5" fill="var(--scene-glow)" opacity=".85"/>
+      ${[8,26,62,80].map(x=>win(x,10,12,10)).join('')}<rect x="42" y="22" width="16" height="22" rx="2" fill="var(--scene-roof)"/><path d="M106 2 v-30" stroke="var(--scene-roof)" stroke-width="1.5"/><path d="M106 -28 l14 5 -14 5Z" fill="var(--scene-glow)"/></g>
+      ${pine(110,124,.9)}${pine(290,124,1)}${pine(310,128,.7)}${near}`,
+    work:rural
+      ?`${stars}${sun(196,30,12)}${cloud(260,40,.8)}${cloud(340,48,.6,'slow')}${far}${mid}
+        <g stroke="var(--scene-accent)" stroke-width="2.4" stroke-linecap="round" opacity=".9">${[...Array(10)].map((_,i)=>`<path d="M${30+i*20} 134 q4 -12 0 -18"/>`).join('')}</g>
+        <g transform="translate(286 92)"><rect x="0" y="0" width="54" height="30" rx="2" fill="var(--scene-build)"/><path d="M-5 2 L27 -18 L59 2Z" fill="var(--scene-roof)"/>${win(8,9,10,9)}<rect x="30" y="12" width="14" height="18" fill="var(--scene-roof)"/></g>${tree(360,118,.8)}${near}`
+      :`${stars}<circle cx="200" cy="26" r="9" fill="var(--scene-sun)"/>${cloud(120,28,.8,'slow')}
+        <g fill="var(--scene-far)">${[[10,50],[52,72],[96,44],[140,86],[190,60],[236,78],[282,52],[326,70],[366,58]].map(([x,h])=>`<rect x="${x}" y="${128-h}" width="36" height="${h+40}" rx="2"/>`).join('')}</g>
+        <g fill="var(--scene-build)">${[[0,34],[40,52],[86,40],[126,62],[178,46],[222,58],[268,38],[312,54],[356,44]].map(([x,h])=>`<rect x="${x}" y="${132-h}" width="40" height="${h+30}" rx="2"/>`).join('')}</g>
+        <g>${[[8,104],[52,88],[60,100],[96,98],[134,76],[142,92],[186,94],[230,82],[238,100],[276,100],[320,86],[364,96]].map(([x,y],i)=>`<rect class="win${i%3===0?' late':''}" x="${x}" y="${y}" width="6" height="7" rx="1" fill="var(--scene-glow)"/>`).join('')}</g>
+        <path d="M0 132 H400 V160 H0Z" fill="var(--scene-ground)"/>`,
+    old:`${stars}${sun(196,32,12)}${cloud(260,30,.8,'slow')}${far}${mid}${tree(70,118,1.3)}
+      <g transform="translate(220 110)" fill="var(--scene-roof)"><rect x="0" y="0" width="56" height="5" rx="2"/><rect x="0" y="-12" width="56" height="4" rx="2"/><rect x="4" y="5" width="4" height="12"/><rect x="48" y="5" width="4" height="12"/></g>
+      <g transform="translate(300 84)"><rect x="-1.5" y="0" width="3" height="40" fill="var(--scene-roof)"/><circle cx="0" cy="-2" r="11" fill="url(#${id}h)"/><circle cx="0" cy="-2" r="4.5" fill="var(--scene-glow)"/></g>
+      <g fill="var(--scene-flower)">${[150,162,176,340,352,366].map((x,i)=>`<circle cx="${x}" cy="${128+(i%2)*3}" r="2.4"/>`).join('')}</g>${near}`,
+    dead:`${stars}<circle cx="200" cy="32" r="10" fill="var(--scene-sun)" opacity=".5"/>${far}${mid}${tree(200,122,.9)}${near}<rect width="400" height="160" fill="var(--scene-sky)" opacity=".35"/>`
   };
-  return `<svg class="scene" viewBox="0 0 400 160" preserveAspectRatio="xMidYMax slice" aria-hidden="true">${S[st]||S.child}</svg>`;
+  return `<svg class="scene" viewBox="0 0 400 160" preserveAspectRatio="xMidYMax slice" aria-hidden="true">${sky}${S[st]||S.child}</svg>`;
 }
 
 LR.portrait={svg,stage,scene,traits};

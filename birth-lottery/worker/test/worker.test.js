@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { _resetLimits } from '../src/index.js';
-import { toGeminiSchema } from '../src/providers.js';
+import { toGeminiSchema, _resetModels } from '../src/providers.js';
 import { isInappropriate, outputIsSafe } from '../src/filter.js';
 
 const ORIGIN = 'http://localhost:8000';
@@ -32,7 +32,7 @@ function req(path, body, { origin = ORIGIN, method = 'POST', ip = '1.2.3.4' } = 
 }
 const call = (r, env = ENV) => worker.fetch(r, env);
 
-test.beforeEach(() => _resetLimits());
+test.beforeEach(() => { _resetLimits(); _resetModels(); });
 
 test('CORS: чужой сайт получает 403, разрешённый — заголовки', async () => {
   mockFetch(() => gemini(DREAM));
@@ -57,8 +57,9 @@ test('мечта: ключ уходит только в заголовке, от
   assert.equal(calls.length, 1);
   assert.ok(!calls[0].url.includes('test-key-123'), 'ключа нет в адресе');
   assert.equal(calls[0].headers['x-goog-api-key'], 'test-key-123');
-  assert.match(calls[0].url, /gemini-2\.5-flash:generateContent$/);
+  assert.match(calls[0].url, /gemini-3\.5-flash:generateContent$/);
   const gc = calls[0].body.generationConfig;
+  assert.deepEqual(gc.thinkingConfig, { thinkingLevel: 'minimal' });
   assert.equal(gc.responseMimeType, 'application/json');
   assert.equal(gc.responseSchema.type, 'OBJECT');
   assert.ok(!('additionalProperties' in gc.responseSchema));
@@ -182,4 +183,35 @@ test('бытовые события от ИИ: возраст в окне, ме�
   assert.match(calls[0].body.contents[0].parts[0].text, /нет водопровода/);
   assert.match(calls[0].body.systemInstruction.parts[0].text, /от 3 до 5 лет/);
   assert.equal((await call(req('/moments', { ageFrom: 5, ageTo: 30 }))).status, 400, 'окно не больше 10 лет');
+});
+
+test('Gemini: отключённая модель → Worker сам переходит на следующую и запоминает её', async () => {
+  mockFetch(url => /gemini-3\.5-flash/.test(url)
+    ? { status: 404, json: { error: { code: 404, message: 'models/gemini-3.5-flash is not found for API version v1beta' } } }
+    : gemini(DREAM));
+  const r = await call(req('/dream', { text: 'врачом' }));
+  assert.equal(r.status, 200);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].url, /gemini-flash-latest:generateContent$/);
+  assert.ok(!calls[1].body.generationConfig.thinkingConfig, 'алиасу настройки размышлений не передаются');
+  await call(req('/dream', { text: 'врачом' }));
+  assert.equal(calls.length, 3);
+  assert.match(calls[2].url, /gemini-flash-latest/, 'рабочая модель запомнена');
+  const h = await (await call(req('/health', null, { method: 'GET' }))).json();
+  assert.equal(h.model, 'gemini-flash-latest');
+});
+
+test('/health?test=1 делает настоящий запрос и объясняет ошибку без ключа', async () => {
+  mockFetch(() => ({ status: 400, json: { error: { message: 'API key not valid. Please pass a valid API key.' } } }));
+  const h = await (await call(req('/health?test=1', null, { method: 'GET' }))).json();
+  assert.equal(h.ok, false);
+  assert.equal(h.error, 'upstream');
+  assert.equal(h.status, 400);
+  assert.match(h.detail, /API key not valid/);
+  assert.ok(!JSON.stringify(h).includes('test-key-123'));
+  mockFetch(() => gemini({ ok: true }));
+  const ok = await (await call(req('/health?test=1', null, { method: 'GET' }))).json();
+  assert.equal(ok.ok, true);
+  const nokey = await (await call(req('/health?test=1', null, { method: 'GET' }), { ...ENV, GEMINI_API_KEY: '' })).json();
+  assert.equal(nokey.error, 'not_configured');
 });

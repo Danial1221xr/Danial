@@ -4,9 +4,10 @@
    образование, занятие, подписи прошлых решений) — ничего о самом игроке. */
 (function(){
 window.LR=window.LR||{};
-const TIMEOUT=8000;
+// новые модели Gemini «думают» перед ответом: на события нескольких лет нужно до 20–25 секунд
+const TIMEOUT={'/dream':15000,'/fork':20000,'/moments':28000,'/epilogue':20000};
 let pausedUntil=0;   // после лимита или сбоя ИИ на время выключается, чтобы не ждать каждый раз
-let lastError='';
+let lastError='',fails=0;
 
 // Тот же принцип, что и в Worker'е: в мягком режиме не показываем текст ИИ со словами о смерти и насилии.
 const SOFT=/(^|[\s«"(-])(убий|убит|смерт|умер|умир|гибел|погиб|насил|войн|оружи|самоуб|суицид)/i;
@@ -18,16 +19,20 @@ function endpoint(){return String((LR.config&&LR.config.AI_ENDPOINT)||'').trim()
 async function call(path,body){
   const base=endpoint();
   if(!base||Date.now()<pausedUntil)return null;
-  const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),TIMEOUT);
+  const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),TIMEOUT[path]||20000);
+  // пауза растёт с числом сбоев подряд: 20 с, 40 с, 80 с … до 5 минут
+  const pause=ms=>{fails++;pausedUntil=Date.now()+Math.min(5*60000,ms*Math.pow(2,Math.min(fails-1,4)))};
   try{
     const r=await fetch(base+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body),signal:ctl.signal});
     if(r.status===422){lastError='inappropriate';return {error:'inappropriate'}}
-    if(r.status===429||r.status===503){lastError='limit';pausedUntil=Date.now()+10*60*1000;return null}
-    if(!r.ok){lastError='error';pausedUntil=Date.now()+60*1000;return null}
+    if(!r.ok){let code='';try{code=(await r.json()).error||''}catch(e){}
+      lastError=code||('http_'+r.status);
+      if(r.status===403)lastError='origin';
+      pause(r.status===429?30000:code==='not_configured'?300000:20000);report();return null}
     const v=await r.json();
     if(!safe(v,body.soft)){lastError='unsafe';return null}
-    lastError='';return v;
-  }catch(e){lastError=e.name==='AbortError'?'timeout':'network';pausedUntil=Date.now()+60*1000;return null}
+    lastError='';fails=0;report();return v;
+  }catch(e){lastError=e.name==='AbortError'?'timeout':'network';pause(20000);report();return null}
   finally{clearTimeout(t)}
 }
 
@@ -55,11 +60,36 @@ function homeOf(L){const h=L.home2;if(!h)return '';
 let provider='gemini';
 if(endpoint())fetch(endpoint()+'/health').then(r=>r.ok?r.json():null).then(v=>{if(v&&v.provider)provider=v.provider}).catch(()=>{});
 
+/* понятное объяснение ошибки для игрока */
+const WHY={timeout:'ИИ отвечал слишком долго',network:'нет связи с Worker\'ом (адрес в js/config.js или сеть)',origin:'Worker не принимает запросы с этого адреса — откройте игру на http://localhost:8000 или впишите адрес в ALLOWED_ORIGINS',
+  rate_limit:'слишком много запросов, ИИ отдыхает',quota:'закончился бесплатный лимит Gemini на сегодня или в минуту',not_configured:'в Worker\'е не задан ключ (npx wrangler secret put GEMINI_API_KEY)',
+  upstream:'Google вернул ошибку',bad_output:'ИИ ответил не по формату',unsafe:'ответ ИИ не прошёл фильтр',unsafe_output:'ответ ИИ не прошёл фильтр',internal:'ошибка внутри Worker\'а'};
+function explain(code,detail){const base=WHY[code]||('ошибка '+code);
+  if(code==='upstream'&&/API key not valid|API_KEY_INVALID/i.test(detail||''))return 'ключ Gemini недействителен — создайте новый и задайте его заново';
+  if(code==='upstream'&&/not found|no longer available/i.test(detail||''))return 'модель Gemini отключена — обновите Worker (npx wrangler deploy)';
+  return base}
+const listeners=[];
+function report(){for(const f of listeners)try{f(status())}catch(e){}}
+function status(){if(!endpoint())return {state:'off',text:'ИИ не подключён: работают заготовки'};
+  if(!lastError)return {state:'ok',text:''};
+  return {state:'err',code:lastError,text:explain(lastError)}}
+/* настоящая проверка: Worker делает короткий запрос к ИИ */
+async function check(){const base=endpoint();if(!base)return {ok:false,text:'Адрес Worker\'а не указан в js/config.js'};
+  try{const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),30000);
+    const r=await fetch(base+'/health?test=1',{signal:ctl.signal});clearTimeout(t);
+    const v=await r.json();
+    const here=location.origin,list=String(v.origins||'').split(',').map(x=>x.trim());
+    if(v.origins&&!list.includes(here))return {ok:false,text:`ИИ на сервере работает, но Worker не принимает запросы с адреса ${here}. Откройте игру по одному из адресов: ${list.join(', ')} — или добавьте этот адрес в ALLOWED_ORIGINS в worker/wrangler.toml и выполните npx wrangler deploy.`};
+    if(v.ok){lastError='';fails=0;pausedUntil=0;if(v.provider)provider=v.provider;report();return {ok:true,text:`ИИ работает: ${v.provider}, модель ${v.model}`}}
+    return {ok:false,text:explain(v.error,v.detail)+(v.detail?` (${String(v.detail).slice(0,140)})`:'')}}
+  catch(e){return {ok:false,text:e.name==='AbortError'?'Worker не ответил за 30 секунд':'Нет связи с Worker\'ом: проверьте адрес в js/config.js и что Worker задеплоен'}}}
+
 LR.ai={
   enabled:()=>!!endpoint(),
   provider:()=>provider,
   available:()=>!!endpoint()&&Date.now()>=pausedUntil,
   lastError:()=>lastError,
+  status,check,onStatus:f=>listeners.push(f),
   contextOf,
   /* мечта → {sphere,title,edu,needUni,needMove,difficulty,short} | {error:'inappropriate'} | null */
   classifyDream:(text,L)=>call('/dream',{...contextOf(L),text}),

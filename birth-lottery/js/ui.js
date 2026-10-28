@@ -41,6 +41,17 @@ const sel=$('#realCountry');[...COUNTRIES].sort((a,b)=>a.name.localeCompare(b.na
 sel.value=S.real;sel.addEventListener('change',()=>{S.real=sel.value;store.set('lr.real',S.real)});
 $('#soft').checked=!!S.soft;$('#soft').addEventListener('change',e=>{S.soft=e.target.checked;store.set('lr.soft',S.soft)});
 $('#btnBorn').addEventListener('click',startLife);
+/* состояние ИИ на старте: зелёная точка — работает, красная — что именно не так */
+function aiShow(r){const ai=window.LR.ai;if(!ai||!ai.enabled())return;$('#aiStatus').hidden=false;
+  $('#aiDot').className='ai-dot'+(r?(r.ok?' ok':' err'):'');
+  $('#aiText').textContent=r?(r.ok?r.text:'ИИ не работает'):'ИИ подключён, нажмите «Проверить», если события от ИИ не появляются';
+  $('#aiMore').hidden=!r||r.ok;$('#aiMore').textContent=r&&!r.ok?r.text:''}
+aiShow(null);
+$('#aiCheck').addEventListener('click',async e=>{const b=e.currentTarget;b.disabled=true;$('#aiText').textContent='Проверяем… (до 30 секунд)';
+  aiShow(await LR.ai.check());b.disabled=false});
+// если ИИ перестал отвечать посреди жизни — одна строка в ленте, без спама
+if(window.LR.ai)LR.ai.onStatus(st=>{if(st.state==='err'&&G.L&&G.L.alive&&!G.aiWarned){G.aiWarned=true;addFeed(G.L.age,{k:'stat',t:`ИИ сейчас не отвечает: ${st.text}. События и выборы берутся из заготовок игры, через минуту ИИ попробует снова.`})}
+  if(st.state==='ok')G.aiWarned=false});
 /* тема: как в системе, светлая или тёмная; data-theme ставится ещё в <head>, чтобы не мигало */
 function applyTheme(v){if(v==='light'||v==='dark')document.documentElement.dataset.theme=v;else delete document.documentElement.dataset.theme}
 segInit('#segTheme',S.theme,v=>{S.theme=v;store.set('lr.theme',v);applyTheme(v)});applyTheme(S.theme);
@@ -57,7 +68,7 @@ loadJSON('data/world.json').then(world=>{
 function startLife(country){if(country instanceof Event)country=null;
   // один мир на всех, кто родился в эту секунду: те же кризисы, эпидемии и новости
   G.world=E.makeWorld(new Date().getFullYear(),Math.floor(Math.random()*4294967296));
-  G.L=new Life({mode:S.mode,soft:S.soft,world:G.world,country:country||undefined});G.notes=[];G.aiMom={};G.aiUpTo=0;G.aiBusy=false;
+  G.aiWarned=false;G.L=new Life({mode:S.mode,soft:S.soft,world:G.world,country:country||undefined});G.notes=[];G.aiMom={};G.aiUpTo=0;G.aiBusy=false;
   G.nbs=[0,1,2,3].map(()=>simulateFull(S.mode,S.soft,G.world));
   G.yearDur=(+S.dur*60)/avgLE(G.L.c);G.acc=0;G.queue=[];G.modal=false;G.quitArm=false;G.endShown=false;
   $('#feed').innerHTML='';$('#stats').innerHTML='';G.skillW={};G.genW=0;phase.fill(undefined);buildThread();G.stageKey=G.portraitKey=null;$('#sceneWrap').innerHTML=$('#ptWrap').innerHTML='';
@@ -251,7 +262,11 @@ function renderGen(L){const born=E.worldBirths()/1000,a=L.age,alive=E.cohortSurv
     <p class="muted" style="font-size:13px;margin:6px 0 0">${L.home.inName[0].toUpperCase()+L.home.inName.slice(1)} до этого возраста доживают ${Math.round(survTo(L.home,L.sex,a)*100)}% ${L.sex==='m'?'мальчиков':'девочек'}.</p>`;
   G.genW=(alive*100).toFixed(1);growBars($('#gen'))}
 /* портрет и фон этапа жизни; смена — плавным наложением слоёв */
-function swapLayer(box,html){const old=[...box.children];const el=document.createElement('div');el.className='layer';el.innerHTML=html;box.appendChild(el);
+function swapLayer(box,html){const old=[...box.children];const el=document.createElement('div');el.className='layer';el.innerHTML=html;
+  // на высокой скорости годы сменяются быстрее, чем идёт наплыв: тогда меняем сразу, без полупрозрачной каши
+  const now=performance.now(),quick=now-(box._t||0)<800;box._t=now;
+  if(quick||REDUCE()){el.classList.add('on','now');old.forEach(o=>o.remove());box.appendChild(el);return}
+  box.appendChild(el);
   requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('on')));old.forEach(o=>{o.classList.remove('on');setTimeout(()=>o.remove(),700)})}
 const STAGE_NAME={child:'Детство',school:'Учёба',work:'Работа',old:'Старость',dead:'Конец пути'};
 function renderStage(L){const P=LR.portrait,st=L.phase();

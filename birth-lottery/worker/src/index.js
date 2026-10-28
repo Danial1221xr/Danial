@@ -8,8 +8,9 @@
 // POST /epilogue  — короткий итог в конце жизни
 // POST /moments   — обычные события и бытовой выбор на несколько лет вперёд
 // GET  /health    — проверка, что Worker жив (без секретов)
+// GET  /health?test=1 — настоящий короткий запрос к ИИ: откройте в браузере, чтобы увидеть, что не так
 import { ENDPOINTS } from './schemas.js';
-import { callModel, providerOf, ProviderError } from './providers.js';
+import { callModel, providerOf, ProviderError, lastModel } from './providers.js';
 import { isInappropriate, outputIsSafe } from './filter.js';
 
 const MAX_BODY = 4096;
@@ -49,8 +50,20 @@ export default {
         'access-control-allow-headers': 'content-type', 'access-control-max-age': '86400', vary: 'Origin' } });
     }
     if (url.pathname === '/health' && request.method === 'GET') {
+      // проверку видно с любого сайта: в ней нет секретов, а запрос к ИИ ограничен 4 в минуту
+      const origin = allowedOrigin(request, env) || '*';
       let p; try { p = providerOf(env); } catch (e) { return reply({ ok: false, error: 'bad_provider' }, 500, origin); }
-      return reply({ ok: true, provider: p.name, model: p.model, configured: !!p.key }, 200, origin);
+      const info = { provider: p.name, model: lastModel() || p.model, configured: !!p.key, origins: String(env.ALLOWED_ORIGINS || '') };
+      if (!url.searchParams.has('test')) return reply({ ok: true, ...info }, 200, origin);
+      if (!memLimit('health:' + (request.headers.get('CF-Connecting-IP') || ''), 4)) return reply({ ok: false, error: 'rate_limit', ...info }, 429, origin);
+      if (!p.key) return reply({ ok: false, error: 'not_configured', hint: 'Не задан секрет с ключом: npx wrangler secret put GEMINI_API_KEY', ...info }, 503, origin);
+      try {
+        const out = await callModel(env, { system: 'Ты проверка связи. Ответь JSON.', user: 'Верни {"ok": true}.', schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false }, maxTokens: 50 });
+        return reply({ ok: !!(out && out.ok), ...info, model: lastModel() || p.model }, 200, origin);
+      } catch (e) {
+        const code = e instanceof ProviderError ? e.code : 'internal';
+        return reply({ ok: false, error: code, status: e.status || 0, detail: String(e.detail || e.message || '').replace(p.key, '***').slice(0, 300), ...info }, 200, origin);
+      }
     }
     if (!origin) return reply({ error: 'origin_not_allowed' }, 403, null);
     if (request.method !== 'POST') return reply({ error: 'method' }, 405, origin);
@@ -82,6 +95,8 @@ export default {
       const { system, user } = ep.prompt(input);
       out = await callModel(env, { system, user, schema: ep.schema, maxTokens: ep.maxTokens });
     } catch (e) {
+      // видно в «npx wrangler tail»: код ошибки и начало ответа ИИ, без ключа
+      console.error('[ai]', url.pathname, e && e.code, e && e.status, String(e && e.detail || '').slice(0, 200));
       if (e instanceof ProviderError) {
         if (e.code === 'blocked') return reply({ error: 'inappropriate' }, 422, origin);
         if (e.code === 'quota') return reply({ error: 'quota' }, 503, origin);
